@@ -1,79 +1,170 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+# Universal Scanner Example App
 
-# Getting Started
+This is the demo application for the `react-native-universal-scanner` plugin, showcasing real-time code detection and scanning capabilities.
 
->**Note**: Make sure you have completed the [React Native - Environment Setup](https://reactnative.dev/docs/environment-setup) instructions till "Creating a new application" step, before proceeding.
+## Overview
 
-## Step 1: Start the Metro Server
+The example app demonstrates:
+- Real-time camera feed with frame processing
+- Multi-code type detection (QR, barcodes, text, containers, etc.)
+- Visual bounding boxes with confidence scores
+- Performance metrics and debugging tools
 
-First, you will need to start **Metro**, the JavaScript _bundler_ that ships _with_ React Native.
+## Setup
 
-To start Metro, run the following command from the _root_ of your React Native project:
+### Prerequisites
+
+- Node.js 16+
+- Yarn or npm
+- For iOS: macOS with Xcode 14+
+- For Android: Android Studio with SDK 23+
+
+### Installation
 
 ```bash
-# using npm
-npm start
+# From the example directory
+yarn install
 
-# OR using Yarn
-yarn start
+# iOS only
+cd ios && pod install && cd ..
 ```
 
-## Step 2: Start your Application
-
-Let Metro Bundler run in its _own_ terminal. Open a _new_ terminal from the _root_ of your React Native project. Run the following command to start your _Android_ or _iOS_ app:
-
-### For Android
+### Running the App
 
 ```bash
-# using npm
-npm run android
-
-# OR using Yarn
+# Android
 yarn android
-```
 
-### For iOS
-
-```bash
-# using npm
-npm run ios
-
-# OR using Yarn
+# iOS (requires macOS)
 yarn ios
 ```
 
-If everything is set up _correctly_, you should see your new app running in your _Android Emulator_ or _iOS Simulator_ shortly provided you have set up your emulator/simulator correctly.
+## Features Demonstrated
 
-This is one way to run your app — you can also run it directly from within Android Studio and Xcode respectively.
+### 1. Basic Scanner
+Simple QR and barcode scanning with automatic detection.
 
-## Step 3: Modifying your App
+### 2. Container Scanner
+Specialized mode for ISO 6346 container code detection with validation.
 
-Now that you have successfully run the app, let's modify it.
+### 3. Multi-Type Scanner
+Simultaneous detection of multiple code types with filtering options.
 
-1. Open `App.tsx` in your text editor of choice and edit some lines.
-2. For **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Developer Menu** (<kbd>Ctrl</kbd> + <kbd>M</kbd> (on Window and Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (on macOS)) to see your changes!
+### 4. Manual Mode
+Tap-to-scan functionality for crowded scenes.
 
-   For **iOS**: Hit <kbd>Cmd ⌘</kbd> + <kbd>R</kbd> in your iOS Simulator to reload the app and see your changes!
+### 5. Debug Mode
+Verbose output showing:
+- Frame processing times
+- Detection confidence scores
+- Bounding box coordinates
+- Model inference details
 
-## Congratulations! :tada:
+## Project Structure
 
-You've successfully run and modified your React Native App. :partying_face:
+```
+example/
+├── src/
+│   ├── App.tsx           # Main app component
+│   ├── screens/          # Different scanner demos
+│   ├── components/       # Reusable UI components
+│   └── utils/           # Helper functions
+├── android/             # Android native code
+├── ios/                # iOS native code
+└── assets/             # Test images and models
+```
 
-### Now what?
+## Configuration
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [Introduction to React Native](https://reactnative.dev/docs/getting-started).
+The app includes several configuration options:
 
-# Troubleshooting
+```typescript
+// In App.tsx
+const SCANNER_CONFIG = {
+  enabledTypes: ['code_qr', 'code_barcode_1d', 'code_container_h'],
+  verbose: true,
+  manualMode: false,
+  regexPerType: {
+    'code_container_h': [/^[A-Z]{4}\d{7}$/]
+  }
+};
+```
 
-If you can't get this to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+## Testing Different Scenarios
 
-# Learn More
+### Good Lighting
+Test with well-lit, clear codes to verify basic functionality.
 
-To learn more about React Native, take a look at the following resources:
+### Low Light
+Enable device torch to test low-light performance.
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+### Multiple Codes
+Test with multiple codes in frame to verify detection filtering.
+
+### Motion Blur
+Move camera while scanning to test motion compensation.
+
+### Different Angles
+Test detection at various angles (0°, 45°, 90°).
+
+## Performance Metrics
+
+The app displays real-time performance metrics:
+- FPS (Frames Per Second)
+- Detection latency (ms)
+- Memory usage
+- CPU utilization
+
+## Troubleshooting
+
+### Build Issues
+
+**Android**: Clean and rebuild
+```bash
+cd android && ./gradlew clean && cd ..
+yarn android
+```
+
+**iOS**: Clean build folder
+```bash
+cd ios && xcodebuild clean && pod install && cd ..
+yarn ios
+```
+
+### Camera Permissions
+
+Ensure camera permissions are granted in device settings.
+
+### Performance Issues
+
+- Reduce camera resolution
+- Enable frame skipping
+- Disable verbose mode
+
+## Development
+
+### Adding New Scanner Modes
+
+1. Create new screen in `src/screens/`
+2. Configure scanner with specific `enabledTypes`
+3. Add navigation entry in `App.tsx`
+
+### Custom Frame Processing
+
+```typescript
+const frameProcessor = useFrameProcessor((frame) => {
+  'worklet';
+  const results = scanFrame(frame);
+  // Custom processing logic
+}, []);
+```
+
+## Known Limitations
+
+- iOS Simulator: Camera not available, use real device
+- Android Emulator: Limited performance, real device recommended
+- Some ONNX operations may not be supported on all devices
+
+## Contributing
+
+See main project [CONTRIBUTING.md](../CONTRIBUTING.md) for guidelines.

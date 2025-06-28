@@ -71,3 +71,7 @@ lib/
 
 # Generated Tensorflow Lite lib
 android/src/main/cpp/lib
+
+# keep out of the repo
+.env
+

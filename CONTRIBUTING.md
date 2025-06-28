@@ -1,20 +1,43 @@
-# Contributing
+# Contributing to Universal Scanner
 
-Contributions are always welcome, no matter how large or small!
+We love contributions! Whether it's bug fixes, new features, or documentation improvements, we appreciate your help in making Universal Scanner better.
 
-We want this community to be friendly and respectful to each other. Please follow it in all your interactions with the project.
+## Code of Conduct
 
-## Development workflow
+We want this community to be friendly and respectful. Please be considerate and constructive in all interactions.
 
-To get started with the project, run `yarn` in the root directory to install the required dependencies for each package:
+## Development Setup
 
+### Prerequisites
+
+- Node.js 16+
+- Yarn (preferred) or npm
+- For iOS: macOS with Xcode 14+
+- For Android: Android Studio with Android SDK 23+
+- CMake 3.18+ (for C++ compilation)
+- Python 3.8+ (for training scripts)
+
+### Initial Setup
+
+1. Clone the repository:
 ```sh
-yarn
+git clone https://github.com/yourusername/react-native-universal-scanner
+cd react-native-universal-scanner
 ```
 
-> While it's possible to use [`npm`](https://github.com/npm/cli), the tooling is built around [`yarn`](https://classic.yarnpkg.com/), so you'll have an easier time if you use `yarn` for development.
+2. Install dependencies:
+```sh
+yarn install
+```
 
-While developing, you can run the [example app](/example/) to test your changes. Any changes you make in your library's JavaScript code will be reflected in the example app without a rebuild. If you change any native code, then you'll need to rebuild the example app.
+3. For iOS development:
+```sh
+cd example/ios && pod install
+```
+
+## Development Workflow
+
+While developing, you can run the [example app](/example/) to test your changes. TypeScript/JavaScript changes are reflected immediately, but native code changes require rebuilding.
 
 To start the packager:
 
@@ -53,9 +76,23 @@ Remember to add tests for your change if possible. Run the unit tests by:
 yarn test
 ```
 
-To edit the Objective-C or Swift files, open `example/ios/TfliteExample.xcworkspace` in XCode and find the source files at `Pods > Development Pods > react-native-fast-tflite`.
+### Native Development
 
-To edit the Java or Kotlin files, open `example/android` in Android studio and find the source files at `react-native-fast-tflite` under `Android`.
+#### iOS (Objective-C++/Swift)
+Open `example/ios/UniversalScannerExample.xcworkspace` in Xcode and find the source files at:
+- `Pods > Development Pods > react-native-universal-scanner` for the plugin code
+- `ios/` directory for iOS-specific implementations
+
+#### Android (Kotlin/Java)
+Open `example/android` in Android Studio and find the source files at:
+- `react-native-universal-scanner` module for the plugin code
+- `android/src/main/java/com/universalscanner/` for Android-specific implementations
+- `android/src/main/cpp/` for C++ JNI code
+
+#### C++ Core
+The shared C++ code is located in:
+- `cpp/` directory for cross-platform scanner engine
+- Platform-specific bridges in `android/src/main/cpp/` and `ios/cpp/`
 
 
 ### Commit message convention
@@ -101,14 +138,48 @@ The `package.json` file contains various scripts for common tasks:
 - `yarn example android`: run the example app on Android.
 - `yarn example ios`: run the example app on iOS.
 
-### Sending a pull request
+### Key Areas for Contribution
+
+1. **New Code Type Support**: Add detection for new code types (e.g., Data Matrix, PDF417)
+2. **Performance Optimization**: Improve frame processing speed or memory usage
+3. **ML Model Updates**: Train and integrate better YOLO models
+4. **Platform Features**: Add platform-specific optimizations
+5. **Documentation**: Improve guides, API docs, or examples
+6. **Testing**: Add unit tests, integration tests, or test utilities
+7. **Bug Fixes**: Fix issues reported by the community
+
+### Project Structure
+
+```
+react-native-universal-scanner/
+├── src/                    # TypeScript source (API, types, hooks)
+├── cpp/                    # Shared C++ scanner engine
+├── android/               # Android native implementation
+│   ├── src/main/java/     # Kotlin/Java code
+│   └── src/main/cpp/      # JNI bridge code
+├── ios/                   # iOS native implementation
+├── example/               # Demo application
+├── detection/             # ML training scripts and datasets
+└── docs/                  # Documentation
+```
+
+### Sending a Pull Request
 
 > **Working on your first pull request?** You can learn how from this _free_ series: [How to Contribute to an Open Source Project on GitHub](https://app.egghead.io/playlists/how-to-contribute-to-an-open-source-project-on-github).
 
 When you're sending a pull request:
 
-- Prefer small pull requests focused on one change.
-- Verify that linters and tests are passing.
-- Review the documentation to make sure it looks good.
-- Follow the pull request template when opening a pull request.
-- For pull requests that change the API or implementation, discuss with maintainers first by opening an issue.
+- Prefer small pull requests focused on one change
+- Verify that linters and tests are passing
+- Update documentation for API changes
+- Add tests for new functionality
+- Follow the pull request template
+- For major changes, discuss first by opening an issue
+
+### Pull Request Guidelines
+
+1. **Title**: Use conventional commit format (e.g., `feat: add Data Matrix support`)
+2. **Description**: Clearly explain what changed and why
+3. **Testing**: Describe how you tested the changes
+4. **Screenshots**: Include screenshots for UI changes
+5. **Breaking Changes**: Clearly mark any breaking changes

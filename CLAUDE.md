@@ -1,0 +1,138 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Project Overview
+
+This is a universal scanner mobile app built with React Native that detects and decodes multiple code types offline and in real-time. The system is designed as a `react-native-vision-camera` plugin with a standalone demo app.
+
+**Core Architecture (Hybrid MLKit + ONNX):**
+- UI Layer: React Native (TypeScript) + `react-native-vision-camera`
+- Native Layer: Shared C++ core (JNI for Android, Obj-C++ for iOS)
+- Detection: YOLOv8n model (ONNX Runtime)
+- Recognition: MLKit (via JNI/Obj-C++ bridges) for proven reliability, with fallback to ONNX Runtime OCR models and Tesseract for complex text
+- Domain-Specific Pipelines: Code-type specific processing and validation
+
+## Supported Code Types
+
+The scanner supports 11 different code types with specific class names:
+- `code_barcode_1d` — Linear barcodes (EAN, Code128)
+- `code_qr` — 2D QR codes
+- `code_license_plate` — Alphanumeric plates (generic)
+- `code_container_h` — ISO 6346 container codes (horizontal)
+- `code_container_v` — ISO 6346 container codes (vertical)
+- `text_printed` — Freeform printed text (OCR)
+- `code_seal` — Security seals with serials (often dual: QR + text)
+- `code_lcd_display` — Casio/LCD-style digit panels
+- `code_rail_wagon` — Railcar identifier codes
+- `code_air_container` — ULD identifiers for airfreight
+- `code_vin` — Vehicle Identification Numbers (ISO 3779, often dual: QR + text)
+
+## Key DTOs
+
+**Input Configuration:**
+```typescript
+interface ScannerConfig {
+  enabledTypes: string[];
+  regexPerType?: Record<string, string[]>;
+  manualMode?: boolean;
+  verbose?: boolean;
+}
+```
+
+**Output Result:**
+```typescript
+interface ScanResult {
+  type: string;
+  value: string;
+  confidence: number;
+  bbox: { x: number; y: number; width: number; height: number };
+  imageCropPath: string;
+  fullFramePath: string;
+  model: string;
+  verbose?: Record<string, any>;
+}
+```
+
+## Development Approach
+
+- **Stay real**: use the camera. we will not use mock data or placeholder values or generated images unless explicitly agreed to.
+- **Key and parameters**: never use or apply API keys or static project ID's. Ask me to put them in the .env file. Really.
+- **Plugin-First Architecture**: Build as a reusable `react-native-vision-camera` frame processor plugin
+- **Shared Native Core**: C++ implementation to avoid Android/iOS logic duplication
+- **Hybrid ML Strategy**: MLKit for proven text/barcode recognition with ONNX Runtime for YOLO detection
+- **Domain-Specific Pipelines**: Specialized processing for each code type (container validation, license plate formatting, etc.)
+- **Offline-First**: All inference runs on-device with optimized models
+- **Performance Optimized**: Native-heavy processing to minimize RN bridge usage
+- **Verbose Mode**: Rich debugging output for development and QA
+- **Manual Targeting**: User can tap specific codes in cluttered scenes
+
+## Project Status
+
+- **Phase 1 Complete**: Plugin foundation, demo app, and native module structure established
+- **Demo App Ready**: Working Expo camera demo in `/example/` with Android support (iOS requires full Xcode)
+- **Reference Implementation**: Working vertical container scanner in `/ContainerCameraApp/` with realtime frame processing
+- **Current Focus**: Phase 2 - Native C++ core development with MLKit integration
+
+## Development Workflow
+
+- Upon completion of each project step, update the project_plan with the completions and the status outcomes and propose a git commit step
+- Use TypeScript for all React Native code with strict type checking
+- Follow existing code patterns and MLKit integration examples from README.md
+- Prioritize performance by keeping heavy processing in native C++ layer
+- Test on both Android and iOS platforms (Android can be tested with emulator, iOS requires full Xcode)
+
+## Key Technical Patterns
+
+**CRITICAL: ONNX Runtime React Native Output Format**
+⚠️ **MAJOR DISCOVERY (2025-06-27)**: ONNX-RN returns nested arrays, NOT flat Float32Array!
+
+```typescript
+// ❌ WRONG - causes garbage data and low confidence
+const outputData = output.data as Float32Array;
+const centerX = outputData[i];
+
+// ✅ CORRECT - proper nested array handling  
+const raw3d = output.value as number[][][];
+const preds2d = raw3d[0]; // Shape: [9, 8400] or [8400, 9]
+
+// Handle both orientations with adaptive indexing
+const attributes = 9; // 4 bbox + 5 classes for v7 model
+const predsAlongLastDim = preds2d[0].length !== attributes;
+function getVal(anchorIdx: number, featureIdx: number): number {
+  return predsAlongLastDim 
+    ? preds2d[featureIdx][anchorIdx]  // [ATTRIBUTES, N]
+    : preds2d[anchorIdx][featureIdx]; // [N, ATTRIBUTES]
+}
+```
+
+Reference: `/ContainerCameraApp/android/app/src/main/java/com/cargosnap/app/YoloBridgeModule.kt`
+Documentation: `/ONNX-OUTPUT-FORMAT-DISCOVERY.md`
+
+**MLKit Integration via C++:**
+```cpp
+// Android: JNI bridge to MLKit
+class MLKitRecognizer : public ITextRecognizer {
+    jobject mlkitManager;
+    std::string recognizeText(const cv::Mat& image) override;
+};
+
+// iOS: Obj-C++ bridge to MLKit
+@interface MLKitBridge : NSObject
+- (NSString*)recognizeTextFromImage:(UIImage*)image;
+@end
+```
+
+**Domain-Specific Processing:**
+```cpp
+class ContainerProcessor : public ICodeProcessor {
+    bool validateISO6346(const std::string& code);
+    std::string normalizeFormat(const std::string& raw);
+};
+```
+
+# important-instruction-reminders
+Do what has been asked; nothing more, nothing less.
+NEVER create files unless they're absolutely necessary for achieving your goal.
+ALWAYS prefer editing an existing file to creating a new one.
+NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
