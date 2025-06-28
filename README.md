@@ -6,6 +6,78 @@ A high-performance React Native plugin for real-time detection and decoding of m
 
 Universal Scanner is a `react-native-vision-camera` plugin that combines YOLO object detection with MLKit text recognition to scan and decode various types of codes and text in real-time. Built with a hybrid native architecture for optimal performance.
 
+We currently have a **working vertical container code scanner**, including documentation and source code. This will be included in a dedicated (possibly temporary) subfolder within this project.
+
+**✅ DEMO APP READY**: A working Expo camera demo is available in `/example/` - see the README there for setup instructions.
+
+---
+
+## 🎯 Functional Scope
+
+### Core Capabilities
+- Real-time scanning via camera (video stream)
+- Offline model inference using YOLOv8n (ONNX) + OCR
+- Dynamic toggle to enable/disable scanner types
+- Manual targeting mode: user selects code from detected bounding boxes
+- Cross-platform UI via React Native
+- Native inference pipelines in C++ (shared core) bridged to Android (JNI) and iOS (Obj-C++)
+- Output: DTOs with decoded value, class, bbox, image references, and metadata
+- Input: DTO for scanning configuration (e.g. enabled modes, regex filters, manual mode)
+- Built as a reusable `react-native-vision-camera` plugin for drop-in use
+- Demo app included for local development and testing
+- Performant: considering we need this to be a high-performing solution where we will do all complex processing on the native end and avoid significant use of the Native <--> RN bridge which we know to be really slow
+
+---
+
+## 👤 User Stories
+
+### US001 - Scan Anything Instantly
+**As a** logistics worker,  
+**I want** to point my phone at any code (QR, barcode, plate, container ID),  
+**so that** I get a near instant and accurate result without switching modes.
+
+### US002 - Scanner Type Toggle
+**As a** field operator,  
+**I want** to disable certain types of scans,  
+**so that** the scanner focuses only on relevant code types.
+
+### US003a - Manual Targeting Mode
+**As a** warehouse user,  
+**I want** to tap a code in a cluttered image,  
+**so that** I ensure the correct item is decoded.
+
+### US003b - Manual Targeting Mode
+**As a** warehouse user,  
+**I want** the app to highlight what it's "considering", and in case of shapes like the vertical container, helps me aim,  
+**so that** I ensure I am aiming at the right area.
+
+### US004 - Offline Operation
+**As a** mobile user in remote areas and inside thick steel containers,  
+**I want** the scanner to work entirely offline,  
+**so that** I can use it in no-connectivity environments.
+
+### US005 - Multi-Code Detection
+**As a** quality control agent,  
+**I want** the app to decode multiple codes in one frame,  
+**so that** I can scan quickly and efficiently.
+
+### US006 - Reusable Module
+**As a** Cargosnap (internal!) developer of another React-Native Android/iOS app,  
+**I want** to install the universal scanner plugin easily,  
+**so that** I can integrate scanning without custom logic.
+
+### US007 - Input Configuration
+**As a** developer,  
+**I want** to provide a structured input DTO,  
+**so that** the scanner behaves based on configured scan modes, regex filters, and manual input flags.
+
+### US008 - Verbose Debugging & Output
+**As a** developer or tester,  
+**I want** detailed logs and extended output data,  
+**so that** I can trace processing steps, timings, and intermediate results during development.
+
+---
+
 ## Features
 
 - 🎯 **11 Supported Code Types**: QR codes, barcodes, license plates, container codes, and more
