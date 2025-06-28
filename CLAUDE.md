@@ -69,10 +69,11 @@ interface ScanResult {
 
 ## Project Status
 
-- **Phase 1 Complete**: Plugin foundation, demo app, and native module structure established
-- **Demo App Ready**: Working Expo camera demo in `/example/` with Android support (iOS requires full Xcode)
-- **Reference Implementation**: Working vertical container scanner in `/ContainerCameraApp/` with realtime frame processing
-- **Current Focus**: Phase 2 - Native C++ core development with MLKit integration
+- **Baseline Established**: Forked react-native-fast-tflite as proven VisionCamera + JSI foundation
+- **Documentation Recovered**: All user stories, technical architecture, and training assets restored
+- **TensorFlow Lite Demo Working**: Example app builds and runs successfully on Android
+- **Detection Assets Ready**: YOLOv7 models and training scripts available in `/detection/`
+- **Current Focus**: Phase 3 - TensorFlow Lite → ONNX Runtime migration
 
 ## Development Workflow
 
@@ -106,7 +107,7 @@ function getVal(anchorIdx: number, featureIdx: number): number {
 }
 ```
 
-Reference: `/ContainerCameraApp/android/app/src/main/java/com/cargosnap/app/YoloBridgeModule.kt`
+Reference: Working implementation needed (to be created during ONNX migration)
 Documentation: `/ONNX-OUTPUT-FORMAT-DISCOVERY.md`
 
 **MLKit Integration via C++:**
@@ -130,6 +131,27 @@ class ContainerProcessor : public ICodeProcessor {
     std::string normalizeFormat(const std::string& raw);
 };
 ```
+
+## Current Phase: TensorFlow Lite → ONNX Runtime Migration
+
+**Next Steps**:
+1. Test current TensorFlow Lite example app on device
+2. Replace TensorFlow Lite with ONNX Runtime in C++ core
+3. Integrate YOLOv7 detection models from `/detection/models/`
+4. Add MLKit integration alongside ONNX Runtime
+5. Implement Universal Scanner plugin architecture
+
+**Available Assets**:
+- `/detection/models/unified-detection-v7.onnx` - Trained YOLOv7 model
+- `/detection/scripts/` - Training and testing scripts
+- `/detection/notebooks/` - Model training notebooks
+- `/ONNX-OUTPUT-FORMAT-DISCOVERY.md` - Critical output format handling
+
+**Migration Strategy**:
+- Keep existing VisionCamera Frame Processor integration
+- Replace TensorFlow Lite C++ code with ONNX Runtime
+- Maintain JSI bindings and native module structure
+- Add Universal Scanner specific features incrementally
 
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
