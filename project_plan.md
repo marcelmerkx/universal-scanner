@@ -32,15 +32,22 @@ Build a universal scanner mobile app (React Native) that detects and decodes mul
 
 **Current Status**: Recently migrated to react-native-fast-tflite as baseline
 
-### Phase 3: ML Model Integration
+### Phase 3: ONNX Runtime Migration 🔄 **NEXT**
 **Duration**: Week 5-6  
-**Status**: ⏳ **PENDING**
+**Status**: 🔄 **READY TO START**
 
-- [ ] Integrate YOLOv8n ONNX model for object detection
-- [ ] Configure MLKit for text recognition and barcode scanning
-- [ ] Implement model switching and fallback logic
-- [ ] Optimize inference performance for mobile devices
-- [ ] Add GPU delegate support where available
+**Performance Requirements**:
+- Target 30 FPS (33ms per frame) processing time
+- Handle 4K frames (~12MB each) efficiently using zero-copy patterns
+- Maintain <1ms JSI overhead for native plugin calls
+
+**Tasks**:
+- [ ] **3.1**: Replace TensorFlow Lite with ONNX Runtime in C++ core
+- [ ] **3.2**: Integrate YOLOv7 unified detection model from `/detection/models/`
+- [ ] **3.3**: Implement proper ONNX nested array output handling (see ONNX-OUTPUT-FORMAT-DISCOVERY.md)
+- [ ] **3.4**: Add MLKit integration for text/barcode recognition alongside ONNX
+- [ ] **3.5**: Update VisionCamera Frame Processor plugin to call Universal Scanner
+- [ ] **3.6**: Implement async processing with frame copying for complex operations
 
 ### Phase 4: Code Type Processors
 **Duration**: Week 7-8  
@@ -92,10 +99,12 @@ Build a universal scanner mobile app (React Native) that detects and decodes mul
 - **Processing**: Domain-specific pipelines per code type
 
 ### Technical Stack
-- **Frontend**: React Native, TypeScript, VisionCamera
+- **Frontend**: React Native, TypeScript, VisionCamera Frame Processors
+- **JSI Bridge**: VisionCamera's proven Frame Processor Plugin architecture
 - **Native**: C++, JNI (Android), Obj-C++ (iOS)
-- **ML**: MLKit, ONNX Runtime, YOLOv8n
+- **ML**: ONNX Runtime (YOLOv7 detection), MLKit (text/barcode recognition)
 - **Build**: Gradle (Android), Xcode (iOS)
+- **Performance**: Zero-copy frame processing, GPU acceleration, memory pools
 
 ## Current Status
 
@@ -103,13 +112,17 @@ Build a universal scanner mobile app (React Native) that detects and decodes mul
 
 **Recently Completed**:
 - ✅ Successfully migrated to react-native-fast-tflite baseline
-- ✅ Established working TensorFlow Lite example app
+- ✅ Established working TensorFlow Lite example app with VisionCamera integration
 - ✅ Documented critical ONNX output format discovery
+- ✅ Recovered all Universal Scanner documentation and training assets
+- ✅ Updated architecture with VisionCamera Frame Processor best practices
 
-**Next Steps**:
-1. Migrate from TensorFlow Lite to ONNX Runtime
-2. Implement universal scanner plugin architecture
-3. Begin C++ core development with MLKit integration
+**Next Steps (Phase 3)**:
+1. Test current TensorFlow Lite demo app on device
+2. Replace TensorFlow Lite with ONNX Runtime in C++ core
+3. Integrate YOLOv7 detection model with proper output handling
+4. Add MLKit alongside ONNX for text/barcode recognition
+5. Update plugin to call Universal Scanner instead of TensorFlow Lite
 
 ## Key Technical Discoveries
 

@@ -153,6 +153,66 @@ class ContainerProcessor : public ICodeProcessor {
 - Maintain JSI bindings and native module structure
 - Add Universal Scanner specific features incrementally
 
+## VisionCamera Frame Processor Architecture
+
+**Performance Constraints**:
+- **Frame Time Limits**: 30 FPS = 33ms, 60 FPS = 16ms per frame
+- **Memory Intensive**: 4K frames = ~12MB each, 60 FPS = ~700MB/second
+- **Zero-Copy Pattern**: Use direct GPU buffer access, avoid frame copying
+- **JSI Performance**: Native plugin calls add only ~1ms overhead
+
+**Frame Processor Plugin Patterns**:
+```typescript
+// Worklet-based frame processing
+const frameProcessor = useFrameProcessor((frame) => {
+  'worklet'
+  
+  // Call native plugin with direct frame access
+  const results = universalScanner(frame, {
+    enabledTypes: ['container', 'qr', 'barcode'],
+    confidence: 0.7,
+    maxResults: 5
+  })
+  
+  // Handle results on JS thread
+  if (results) {
+    runOnJS(handleScanResults)(results)
+  }
+}, [])
+```
+
+**C++ Plugin Implementation Strategy**:
+```cpp
+// Plugin signature following VisionCamera patterns
+static facebook::jsi::Value universalScanner(
+    facebook::jsi::Runtime& runtime,
+    const facebook::jsi::Value& thisValue,
+    const facebook::jsi::Value* arguments,
+    size_t count
+) {
+    // 1. Extract frame and config
+    auto frame = arguments[0].asObject(runtime);
+    auto config = arguments[1].asObject(runtime);
+    
+    // 2. Process with ONNX + MLKit pipeline
+    auto results = processingEngine.scan(frame, config);
+    
+    // 3. Return structured results
+    return convertToJSI(runtime, results);
+}
+```
+
+**Threading and Async Processing**:
+- **Synchronous Path**: Quick processing within frame time budget
+- **Async Path**: Copy frame, dispatch to background thread, emit results via events
+- **Queue Management**: Handle frame dropping for sustained performance
+
+**Memory Management**:
+- Reuse allocated buffers for tensor processing
+- Minimize heap allocations during frame processing
+- Use memory pools for frequent allocations
+- Proper cleanup of GPU resources
+
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
