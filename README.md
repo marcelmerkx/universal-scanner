@@ -242,14 +242,6 @@ cd example
 yarn ios # or yarn android
 ```
 
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
-
-## License
-
-MIT License - see [LICENSE](LICENSE) for details
-
 ## Acknowledgments
 
 - Built on [react-native-vision-camera](https://github.com/mrousavy/react-native-vision-camera)
