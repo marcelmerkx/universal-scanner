@@ -1,4 +1,4 @@
-package com.onnx;
+package com.tflite;
 
 import com.facebook.react.bridge.JavaScriptContextHolder;
 import com.facebook.react.bridge.ReactApplicationContext;
@@ -18,7 +18,12 @@ public class OnnxModule extends ReactContextBaseJavaModule {
   public static final String NAME = "RNOnnx";
 
   static {
-    System.loadLibrary("onnx");
+    try {
+      System.loadLibrary("onnxruntime");
+    } catch (UnsatisfiedLinkError e) {
+      // ONNX Runtime might not be available
+    }
+    System.loadLibrary("VisionCameraTflite");
   }
 
   public OnnxModule(ReactApplicationContext reactContext) {

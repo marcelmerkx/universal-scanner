@@ -5,7 +5,7 @@ Download License Plate Images from CSV for Training Data
 This script downloads license plate images from URLs listed in a CSV file and saves them
 with filename-safe normalized names in the training data structure.
 
-Input: licenseplate_code.csv with columns "url" and "reference"
+Input: code_license_plate.csv with columns "url" and "reference"
 
 The input file is generated using this SQL query:
 SELECT top 2000
@@ -70,7 +70,7 @@ from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 
 # Default paths
-DEFAULT_CSV_FILE = "detection/training_data/00_raw/licenseplate_code.csv"
+DEFAULT_CSV_FILE = "detection/training_data/00_raw/code_license_plate.csv"
 DEFAULT_OUTPUT_DIR = Path("detection/training_data/00_raw/code_license_plate")
 LOG_DIR = Path("detection/logs")
 

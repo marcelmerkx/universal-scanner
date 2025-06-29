@@ -47,7 +47,7 @@ function onnxModelToString(model: OnnxModel): string {
 }
 
 export default function SwitchableApp(): React.ReactNode {
-  const [mode, setMode] = React.useState<InferenceMode>('tflite')
+  const [mode, setMode] = React.useState<InferenceMode>('onnx')
   const { hasPermission, requestPermission } = useCameraPermission()
   const device = useCameraDevice('back')
 

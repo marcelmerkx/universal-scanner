@@ -10,7 +10,7 @@
 
 namespace mrousavy {
 
-JavaVM* java_machine_onnx;
+extern JavaVM* java_machine;
 
 using namespace facebook;
 using namespace facebook::jni;
@@ -18,7 +18,7 @@ using namespace facebook::jni;
 // Java Installer
 struct OnnxModule : public jni::JavaClass<OnnxModule> {
 public:
-  static constexpr auto kJavaDescriptor = "Lcom/onnx/OnnxModule;";
+  static constexpr auto kJavaDescriptor = "Lcom/tflite/OnnxModule;";
 
   static jboolean
   nativeInstall(jni::alias_ref<jni::JClass>, jlong runtimePtr,
@@ -33,9 +33,9 @@ public:
     auto fetchByteDataFromUrl = [](std::string url) {
       // Attaching Current Thread to JVM
       JNIEnv* env = nullptr;
-      int getEnvStat = java_machine_onnx->GetEnv((void**)&env, JNI_VERSION_1_6);
+      int getEnvStat = java_machine->GetEnv((void**)&env, JNI_VERSION_1_6);
       if (getEnvStat == JNI_EDETACHED) {
-        if (java_machine_onnx->AttachCurrentThread(&env, nullptr) != 0) {
+        if (java_machine->AttachCurrentThread(&env, nullptr) != 0) {
           throw std::runtime_error("Failed to attach thread to JVM");
         }
       }
@@ -70,9 +70,8 @@ public:
   }
 };
 
-} // namespace mrousavy
-
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
-  mrousavy::java_machine_onnx = vm;
-  return facebook::jni::initialize(vm, [] { mrousavy::OnnxModule::registerNatives(); });
+void registerOnnxNatives() {
+  OnnxModule::registerNatives();
 }
+
+} // namespace mrousavy

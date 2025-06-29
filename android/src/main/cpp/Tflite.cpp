@@ -10,7 +10,7 @@
 
 namespace mrousavy {
 
-JavaVM* java_machine;
+extern JavaVM* java_machine;
 
 using namespace facebook;
 using namespace facebook::jni;
@@ -70,9 +70,8 @@ public:
   }
 };
 
-} // namespace mrousavy
-
-JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
-  java_machine = vm;
-  return facebook::jni::initialize(vm, [] { mrousavy::TfliteModule::registerNatives(); });
+void registerTfliteNatives() {
+  TfliteModule::registerNatives();
 }
+
+} // namespace mrousavy

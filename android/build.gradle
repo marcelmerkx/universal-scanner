@@ -86,6 +86,7 @@ android {
             "**/libreact_nativemodule_core.so",
             "**/libtensorflowlite_jni.so",
             "**/libtensorflowlite_gpu_jni.so",
+            "**/libonnxruntime.so",
     ]
   }
   buildTypes {
@@ -134,6 +135,11 @@ dependencies {
   implementation "com.google.ai.edge.litert:litert-gpu:1.0.1"
   extractSO("com.google.ai.edge.litert:litert-gpu:1.0.1")
   extractHeaders("com.google.ai.edge.litert:litert-gpu:1.0.1")
+  
+  // ONNX Runtime
+  implementation "com.microsoft.onnxruntime:onnxruntime-android:1.17.3"
+  extractSO("com.microsoft.onnxruntime:onnxruntime-android:1.17.3")
+  extractHeaders("com.microsoft.onnxruntime:onnxruntime-android:1.17.3")
 }
 
 task extractAARHeaders {
