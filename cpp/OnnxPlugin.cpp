@@ -60,7 +60,7 @@ struct OnnxSession {
   // YOLOv8n unified detection model info
   struct {
     std::vector<int64_t> inputShape = {1, 3, 640, 640}; // NCHW format
-    std::vector<int64_t> outputShape = {1, 16, 8400}; // 16 features (4 bbox + 1 obj + 11 classes) x 8400 anchors
+    std::vector<int64_t> outputShape = {1, 9, 8400}; // 9 features (4 bbox + 5 classes) x 8400 anchors
     std::string inputName = "images";
     std::string outputName = "output0";
   } modelInfo;
@@ -121,11 +121,49 @@ struct OnnxSession {
   // Run real ONNX inference
   std::vector<float> runInference(const std::vector<uint8_t>& inputData) {
     try {
-      // Convert uint8 input to float and normalize to [0,1]
+      // Input is HWC format from resize plugin, need to convert to CHW for ONNX
+      const size_t height = 640;
+      const size_t width = 640;
+      const size_t channels = 3;
+      
+      // Convert uint8 HWC to float CHW and normalize to [0,1]
       std::vector<float> floatInput(inputData.size());
-      for (size_t i = 0; i < inputData.size(); ++i) {
-        floatInput[i] = static_cast<float>(inputData[i]) / 255.0f;
+      
+      // Debug: Check input data range before normalization
+      uint8_t minVal = 255, maxVal = 0;
+      uint32_t sum = 0;
+      const size_t sampleSize = std::min(size_t(1000), inputData.size());
+      for (size_t i = 0; i < sampleSize; i++) {
+        uint8_t val = inputData[i];
+        minVal = std::min(minVal, val);
+        maxVal = std::max(maxVal, val);
+        sum += val;
       }
+      float avgVal = static_cast<float>(sum) / sampleSize;
+      logf("C++ Input BEFORE norm (first %zu): min=%d, max=%d, avg=%.1f", sampleSize, minVal, maxVal, avgVal);
+      
+      // Transpose from HWC to CHW and normalize
+      float minNorm = 1.0f, maxNorm = 0.0f;
+      float sumNorm = 0.0f;
+      for (size_t c = 0; c < channels; ++c) {
+        for (size_t h = 0; h < height; ++h) {
+          for (size_t w = 0; w < width; ++w) {
+            size_t hwcIdx = (h * width + w) * channels + c;  // HWC index
+            size_t chwIdx = c * (height * width) + h * width + w;  // CHW index
+            float normalized = static_cast<float>(inputData[hwcIdx]) / 255.0f; // Normalize to [0,1]
+            floatInput[chwIdx] = normalized;
+            
+            // Track normalized range for first 1000 pixels
+            if (chwIdx < sampleSize) {
+              minNorm = std::min(minNorm, normalized);
+              maxNorm = std::max(maxNorm, normalized);
+              sumNorm += normalized;
+            }
+          }
+        }
+      }
+      float avgNorm = sumNorm / sampleSize;
+      logf("C++ Input AFTER norm (first %zu): min=%.3f, max=%.3f, avg=%.3f", sampleSize, minNorm, maxNorm, avgNorm);
       
       // Create input tensor
       const char* inputNames[] = {modelInfo.inputName.c_str()};
@@ -151,7 +189,26 @@ struct OnnxSession {
       
       std::vector<float> output(outputData, outputData + outputSize);
       
+      // Debug: Log first few raw output values
       logf("ONNX inference completed. Output size: %zu", outputSize);
+      logf("First 10 output values: %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f",
+           outputSize > 0 ? output[0] : 0.0f,
+           outputSize > 1 ? output[1] : 0.0f,
+           outputSize > 2 ? output[2] : 0.0f,
+           outputSize > 3 ? output[3] : 0.0f,
+           outputSize > 4 ? output[4] : 0.0f,
+           outputSize > 5 ? output[5] : 0.0f,
+           outputSize > 6 ? output[6] : 0.0f,
+           outputSize > 7 ? output[7] : 0.0f,
+           outputSize > 8 ? output[8] : 0.0f,
+           outputSize > 9 ? output[9] : 0.0f);
+      
+      // Check if we're getting reasonable bbox values (should be in pixel coordinates 0-640)
+      float firstBbox = outputSize > 0 ? output[0] : 0.0f;
+      if (firstBbox < 1.0f) {
+        logf("WARNING: First bbox value %.4f looks like normalized coordinates!", firstBbox);
+        logf("This suggests the model might expect different preprocessing!");
+      }
       return output;
       
     } catch (const Ort::Exception& e) {
@@ -277,8 +334,8 @@ std::shared_ptr<TypedArrayBase>
 OnnxPlugin::getOutputArrayForSession(jsi::Runtime& runtime, size_t index) {
   std::string name = "output_" + std::to_string(index);
   if (_outputBuffers.find(name) == _outputBuffers.end()) {
-    // Create output buffer for YOLOv8n model (16 x 8400 floats)
-    const size_t outputSize = 16 * 8400;
+    // Create output buffer for YOLOv8n model (9 x 8400 floats)
+    const size_t outputSize = 9 * 8400;
     auto arrayBuffer = runtime.global()
         .getPropertyAsFunction(runtime, "ArrayBuffer")
         .callAsConstructor(runtime, static_cast<double>(outputSize * sizeof(float)))
@@ -328,17 +385,51 @@ jsi::Value OnnxPlugin::copyOutputBuffers(jsi::Runtime& runtime) {
   // Create output array with single tensor
   jsi::Array result(runtime, 1);
   
-  // Get output buffer and update with inference results
-  auto outputBuffer = getOutputArrayForSession(runtime, 0);
+  // Create output object with proper ONNX-RN format
+  jsi::Object outputObject(runtime);
   
-  // Copy _outputData to the JS buffer
   if (!_outputData.empty()) {
-    auto arrayBuffer = outputBuffer->getBuffer(runtime);
-    uint8_t* data = arrayBuffer.data(runtime);
-    std::memcpy(data, _outputData.data(), _outputData.size() * sizeof(float));
+    auto* session = static_cast<OnnxSession*>(_session);
+    
+    // YOLOv8n model outputs [1, 9, 8400]
+    // But per ONNX-OUTPUT-FORMAT-DISCOVERY.md, we need nested arrays
+    const size_t batch = 1;
+    const size_t features = session->modelInfo.outputShape[1]; // 9
+    const size_t anchors = session->modelInfo.outputShape[2];  // 8400
+    
+    // Create 3D nested array structure [batch][features][anchors]
+    jsi::Array batch3d(runtime, batch);
+    
+    for (size_t b = 0; b < batch; b++) {
+      jsi::Array features2d(runtime, features);
+      
+      for (size_t f = 0; f < features; f++) {
+        jsi::Array anchors1d(runtime, anchors);
+        
+        for (size_t a = 0; a < anchors; a++) {
+          // Index into flat array: [batch, features, anchors] layout
+          size_t idx = b * (features * anchors) + f * anchors + a;
+          anchors1d.setValueAtIndex(runtime, a, jsi::Value(_outputData[idx]));
+        }
+        
+        features2d.setValueAtIndex(runtime, f, anchors1d);
+      }
+      
+      batch3d.setValueAtIndex(runtime, b, features2d);
+    }
+    
+    // Set the nested array as the 'value' property (per ONNX-RN format)
+    outputObject.setProperty(runtime, "value", batch3d);
+    
+    // Also set shape info
+    jsi::Array shapeArray(runtime, 3);
+    shapeArray.setValueAtIndex(runtime, 0, jsi::Value(static_cast<int>(batch)));
+    shapeArray.setValueAtIndex(runtime, 1, jsi::Value(static_cast<int>(features)));
+    shapeArray.setValueAtIndex(runtime, 2, jsi::Value(static_cast<int>(anchors)));
+    outputObject.setProperty(runtime, "shape", shapeArray);
   }
   
-  result.setValueAtIndex(runtime, 0, *outputBuffer);
+  result.setValueAtIndex(runtime, 0, outputObject);
   return result;
 }
 
