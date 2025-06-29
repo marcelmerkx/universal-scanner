@@ -75,3 +75,6 @@ android/src/main/cpp/lib
 # keep out of the repo
 .env
 
+# training data and models
+detection/notebooks/runs/*
+detection/notebooks/Unified-detection-*

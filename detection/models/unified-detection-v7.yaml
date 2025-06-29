@@ -1,0 +1,16 @@
+names:
+- code_container_h
+- code_container_v
+- code_license_plate
+- code_qr_barcode
+- code_seal
+nc: 5
+roboflow:
+  license: Private
+  project: unified-detection-0zmvz
+  url: https://app.roboflow.com/cargosnap/unified-detection-0zmvz/7
+  version: 7
+  workspace: cargosnap
+test: ../test/images
+train: ../train/images
+val: ../valid/images
