@@ -1,0 +1,264 @@
+/* eslint-disable @typescript-eslint/no-var-requires */
+import * as React from 'react'
+
+import { 
+  StyleSheet, 
+  View, 
+  Text, 
+  TouchableOpacity,
+  ActivityIndicator 
+} from 'react-native'
+import {
+  Tensor,
+  TensorflowModel,
+  useTensorflowModel,
+  OnnxTensor,
+  OnnxModel,
+  useOnnxModel,
+} from 'react-native-fast-tflite'
+import {
+  Camera,
+  useCameraDevice,
+  useCameraPermission,
+  useFrameProcessor,
+} from 'react-native-vision-camera'
+import { useResizePlugin } from 'vision-camera-resize-plugin'
+
+type InferenceMode = 'tflite' | 'onnx'
+
+function tensorToString(tensor: Tensor | OnnxTensor): string {
+  return `\n  - ${tensor.dataType} ${tensor.name}[${tensor.shape}]`
+}
+
+function tfliteModelToString(model: TensorflowModel): string {
+  return (
+    `TFLite Model (${model.delegate}):\n` +
+    `- Inputs: ${model.inputs.map(tensorToString).join('')}\n` +
+    `- Outputs: ${model.outputs.map(tensorToString).join('')}`
+  )
+}
+
+function onnxModelToString(model: OnnxModel): string {
+  return (
+    `ONNX Model (${model.provider}):\n` +
+    `- Inputs: ${model.inputs.map(tensorToString).join('')}\n` +
+    `- Outputs: ${model.outputs.map(tensorToString).join('')}`
+  )
+}
+
+export default function SwitchableApp(): React.ReactNode {
+  const [mode, setMode] = React.useState<InferenceMode>('tflite')
+  const { hasPermission, requestPermission } = useCameraPermission()
+  const device = useCameraDevice('back')
+
+  // Load both models
+  const tfliteModel = useTensorflowModel(require('../assets/efficientdet.tflite'))
+  const onnxModel = useOnnxModel(require('../assets/unified-detection-v7.onnx'), 'cpu')
+  
+  // Select active model based on mode
+  const isModelLoaded = mode === 'tflite' 
+    ? tfliteModel.state === 'loaded'
+    : onnxModel.state === 'loaded'
+    
+  const actualModel = mode === 'tflite'
+    ? (tfliteModel.state === 'loaded' ? tfliteModel.model : undefined)
+    : (onnxModel.state === 'loaded' ? onnxModel.model : undefined)
+    
+  const modelError = mode === 'tflite'
+    ? (tfliteModel.state === 'error' ? tfliteModel.error : undefined)
+    : (onnxModel.state === 'error' ? onnxModel.error : undefined)
+
+  React.useEffect(() => {
+    if (actualModel == null) return
+    if (mode === 'tflite' && tfliteModel.state === 'loaded') {
+      console.log(`TFLite Model loaded! Shape:\n${tfliteModelToString(tfliteModel.model)}`)
+    } else if (mode === 'onnx' && onnxModel.state === 'loaded') {
+      console.log(`ONNX Model loaded! Shape:\n${onnxModelToString(onnxModel.model)}`)
+    }
+  }, [actualModel, mode, tfliteModel, onnxModel])
+
+  const { resize } = useResizePlugin()
+
+  const frameProcessor = useFrameProcessor(
+    (frame) => {
+      'worklet'
+      if (actualModel == null) {
+        // model is still loading...
+        return
+      }
+
+      console.log(`Running ${mode} inference on ${frame}`)
+      
+      if (mode === 'tflite') {
+        const resized = resize(frame, {
+          scale: {
+            width: 320,
+            height: 320,
+          },
+          pixelFormat: 'rgb',
+          dataType: 'uint8',
+        })
+        const result = actualModel.runSync([resized])
+        const num_detections = result[3]?.[0] ?? 0
+        console.log('TFLite Result: ' + num_detections)
+      } else {
+        // ONNX mode - YOLOv8n unified detection
+        const resized = resize(frame, {
+          scale: {
+            width: 640, // YOLOv8 typically uses 640x640
+            height: 640,
+          },
+          pixelFormat: 'rgb',
+          dataType: 'uint8',
+        })
+        
+        const result = actualModel.runSync([resized])
+        
+        // Handle ONNX nested array output format
+        const raw3d = result[0] as unknown as number[][][]
+        if (raw3d && raw3d[0]) {
+          const preds2d = raw3d[0] // Shape: [9, 8400] or [8400, 9]
+          const attributes = 16 // 4 bbox + 11 classes + 1 objectness for unified model
+          const predsAlongLastDim = preds2d[0].length !== attributes
+          
+          // Find max confidence detection
+          let maxConf = 0
+          let detectedClass = -1
+          
+          if (predsAlongLastDim) {
+            // [ATTRIBUTES, N] format
+            for (let i = 0; i < preds2d[0].length; i++) {
+              const objectness = preds2d[4][i] // objectness score
+              for (let c = 5; c < 16; c++) {
+                const classConf = preds2d[c][i] * objectness
+                if (classConf > maxConf) {
+                  maxConf = classConf
+                  detectedClass = c - 5
+                }
+              }
+            }
+          } else {
+            // [N, ATTRIBUTES] format
+            for (let i = 0; i < preds2d.length; i++) {
+              const objectness = preds2d[i][4] // objectness score
+              for (let c = 5; c < 16; c++) {
+                const classConf = preds2d[i][c] * objectness
+                if (classConf > maxConf) {
+                  maxConf = classConf
+                  detectedClass = c - 5
+                }
+              }
+            }
+          }
+          
+          const classNames = [
+            'code_barcode_1d', 'code_qr', 'code_license_plate', 
+            'code_container_h', 'code_container_v', 'text_printed',
+            'code_seal', 'code_lcd_display', 'code_rail_wagon',
+            'code_air_container', 'code_vin'
+          ]
+          
+          console.log(`ONNX Detection: ${classNames[detectedClass] || 'none'} (${(maxConf * 100).toFixed(1)}%)`)
+        } else {
+          console.log('ONNX Result: Invalid output format')
+        }
+      }
+    },
+    [actualModel, mode]
+  )
+
+  React.useEffect(() => {
+    requestPermission()
+  }, [requestPermission])
+
+  const toggleMode = () => {
+    setMode(current => current === 'tflite' ? 'onnx' : 'tflite')
+  }
+
+  return (
+    <View style={styles.container}>
+      {hasPermission && device != null ? (
+        <Camera
+          device={device}
+          style={StyleSheet.absoluteFill}
+          isActive={true}
+          frameProcessor={frameProcessor}
+          pixelFormat="yuv"
+        />
+      ) : (
+        <Text>No Camera available.</Text>
+      )}
+
+      {/* Mode Switcher Button */}
+      <TouchableOpacity 
+        style={styles.switchButton}
+        onPress={toggleMode}
+      >
+        <Text style={styles.switchText}>
+          Mode: {mode.toUpperCase()}
+        </Text>
+      </TouchableOpacity>
+
+      {/* Loading Indicator */}
+      {!isModelLoaded && (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="small" color="white" />
+          <Text style={styles.loadingText}>Loading {mode} model...</Text>
+        </View>
+      )}
+
+      {/* Error Display */}
+      {modelError && (
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>
+            Failed to load {mode} model! {modelError.message}
+          </Text>
+        </View>
+      )}
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  switchButton: {
+    position: 'absolute',
+    top: 50,
+    right: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: 10,
+    borderRadius: 5,
+  },
+  switchText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  loadingContainer: {
+    position: 'absolute',
+    bottom: 50,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: 10,
+    borderRadius: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: 'white',
+    marginLeft: 10,
+  },
+  errorContainer: {
+    position: 'absolute',
+    bottom: 50,
+    backgroundColor: 'rgba(255, 0, 0, 0.7)',
+    padding: 10,
+    borderRadius: 5,
+    maxWidth: '80%',
+  },
+  errorText: {
+    color: 'white',
+  },
+})

@@ -24,6 +24,15 @@ find_library(
   NO_CMAKE_FIND_ROOT_PATH
 )
 
+# TODO: Add ONNX Runtime library
+# find_library(
+#   ONNXRUNTIME
+#   onnxruntime
+#   PATHS "./src/main/cpp/lib/onnxruntime/jni/${ANDROID_ABI}"
+#   NO_DEFAULT_PATH
+#   NO_CMAKE_FIND_ROOT_PATH
+# )
+
 string(APPEND CMAKE_CXX_FLAGS " -DANDROID")
 
 add_library(
@@ -33,7 +42,9 @@ add_library(
   ../cpp/jsi/TypedArray.cpp
   ../cpp/TensorflowPlugin.cpp
   ../cpp/TensorHelpers.cpp
+  ../cpp/OnnxPlugin.cpp
   src/main/cpp/Tflite.cpp
+  src/main/cpp/Onnx.cpp
 )
 
 # Specifies a path to native header files.
@@ -67,6 +78,52 @@ if(ReactAndroid_VERSION_MINOR GREATER_EQUAL 76)
 else()
   target_link_libraries(
     ${PACKAGE_NAME}
+    ReactAndroid::reactnativejni  # <-- CallInvokerImpl
+  )
+endif()
+
+# Add separate ONNX library target
+add_library(
+  onnx
+  SHARED
+  ../cpp/jsi/Promise.cpp
+  ../cpp/jsi/TypedArray.cpp
+  ../cpp/OnnxPlugin.cpp
+  ../cpp/TensorHelpers.cpp
+  src/main/cpp/Onnx.cpp
+)
+
+target_include_directories(
+  onnx
+  PRIVATE
+  "../cpp"
+  "src/main/cpp"
+  # TODO: Add ONNX Runtime headers path
+  # "src/main/cpp/lib/onnxruntime/headers"
+  "${NODE_MODULES_DIR}/react-native/ReactCommon"
+  "${NODE_MODULES_DIR}/react-native/ReactCommon/callinvoker"
+  "${NODE_MODULES_DIR}/react-native/ReactAndroid/src/main/jni/react/turbomodule"
+)
+
+set_target_properties(onnx PROPERTIES LINKER_LANGUAGE CXX)
+
+target_link_libraries(
+  onnx
+  android                         # <-- log
+  ReactAndroid::jsi               # <-- jsi.h
+  fbjni::fbjni                    # <-- fbjni.h
+  # TODO: Add ONNX Runtime library
+  # ${ONNXRUNTIME}
+)
+
+if(ReactAndroid_VERSION_MINOR GREATER_EQUAL 76)
+  target_link_libraries(
+    onnx
+    ReactAndroid::reactnative     # <-- RN merged so
+  )
+else()
+  target_link_libraries(
+    onnx
     ReactAndroid::reactnativejni  # <-- CallInvokerImpl
   )
 endif()
