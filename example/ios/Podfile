@@ -18,7 +18,7 @@ end
 
 $EnableCoreMLDelegate=true
 
-target 'TfliteExample' do
+target 'UniversalScanner' do
   config = use_native_modules!
 
   use_react_native!(
@@ -28,7 +28,7 @@ target 'TfliteExample' do
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
-  target 'TfliteExampleTests' do
+  target 'UniversalScannerTests' do
     inherit! :complete
     # Pods for testing
   end

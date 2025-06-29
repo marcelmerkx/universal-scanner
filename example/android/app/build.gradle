@@ -74,9 +74,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdkVersion rootProject.ext.compileSdkVersion
 
-    namespace "com.tfliteexample"
+    namespace "com.cargosnap.universalscanner"
     defaultConfig {
-        applicationId "com.tfliteexample"
+        applicationId "com.cargosnap.universalscanner"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

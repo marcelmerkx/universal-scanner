@@ -77,102 +77,97 @@ export default function SwitchableApp(): React.ReactNode {
     }
   }, [actualModel, mode, tfliteModel, onnxModel])
 
+  const [frameProcessorsAvailable, setFrameProcessorsAvailable] = React.useState(true)
   const { resize } = useResizePlugin()
 
-  // Try to use frame processor, but handle the case when it's unavailable
-  let frameProcessor = undefined
-  try {
-    frameProcessor = useFrameProcessor(
-      (frame) => {
-        'worklet'
-        if (actualModel == null) {
-          // model is still loading...
-          return
-        }
+  const frameProcessor = useFrameProcessor(
+    (frame) => {
+      'worklet'
+      if (!frameProcessorsAvailable || actualModel == null) {
+        // frame processors disabled or model is still loading...
+        return
+      }
 
-        console.log(`Running ${mode} inference on ${frame}`)
+      console.log(`Running ${mode} inference on ${frame}`)
+      
+      if (mode === 'tflite') {
+        const resized = resize(frame, {
+          scale: {
+            width: 320,
+            height: 320,
+          },
+          pixelFormat: 'rgb',
+          dataType: 'uint8',
+        })
+        const result = actualModel.runSync([resized])
+        const num_detections = result[3]?.[0] ?? 0
+        console.log('TFLite Result: ' + num_detections)
+      } else {
+        // ONNX mode - YOLOv8n unified detection
+        const resized = resize(frame, {
+          scale: {
+            width: 640, // YOLOv8 typically uses 640x640
+            height: 640,
+          },
+          pixelFormat: 'rgb',
+          dataType: 'uint8',
+        })
         
-        if (mode === 'tflite') {
-          const resized = resize(frame, {
-            scale: {
-              width: 320,
-              height: 320,
-            },
-            pixelFormat: 'rgb',
-            dataType: 'uint8',
-          })
-          const result = actualModel.runSync([resized])
-          const num_detections = result[3]?.[0] ?? 0
-          console.log('TFLite Result: ' + num_detections)
-        } else {
-          // ONNX mode - YOLOv8n unified detection
-          const resized = resize(frame, {
-            scale: {
-              width: 640, // YOLOv8 typically uses 640x640
-              height: 640,
-            },
-            pixelFormat: 'rgb',
-            dataType: 'uint8',
-          })
+        const result = actualModel.runSync([resized])
+        
+        // For our mock ONNX implementation, we get a Float32Array
+        const outputData = result[0] as Float32Array
+        
+        if (outputData && outputData.length > 0) {
+          // YOLOv8n output: [1, 16, 8400] -> 16 features x 8400 anchors
+          const numAnchors = 8400
+          const numFeatures = 16 // 4 bbox + 1 obj + 11 classes
           
-          const result = actualModel.runSync([resized])
+          // Find max confidence detection
+          let maxConf = 0
+          let detectedClass = -1
+          let bestBox = { x: 0, y: 0, w: 0, h: 0 }
           
-          // For our mock ONNX implementation, we get a Float32Array
-          const outputData = result[0] as Float32Array
-          
-          if (outputData && outputData.length > 0) {
-            // YOLOv8n output: [1, 16, 8400] -> 16 features x 8400 anchors
-            const numAnchors = 8400
-            const numFeatures = 16 // 4 bbox + 1 obj + 11 classes
+          // Iterate through all anchors
+          for (let anchor = 0; anchor < numAnchors; anchor++) {
+            const offset = anchor * numFeatures
             
-            // Find max confidence detection
-            let maxConf = 0
-            let detectedClass = -1
-            let bestBox = { x: 0, y: 0, w: 0, h: 0 }
+            // Get objectness score
+            const objectness = outputData[offset + 4]
             
-            // Iterate through all anchors
-            for (let anchor = 0; anchor < numAnchors; anchor++) {
-              const offset = anchor * numFeatures
+            // Check each class
+            for (let c = 0; c < 11; c++) {
+              const classScore = outputData[offset + 5 + c]
+              const confidence = objectness * classScore
               
-              // Get objectness score
-              const objectness = outputData[offset + 4]
-              
-              // Check each class
-              for (let c = 0; c < 11; c++) {
-                const classScore = outputData[offset + 5 + c]
-                const confidence = objectness * classScore
-                
-                if (confidence > maxConf) {
-                  maxConf = confidence
-                  detectedClass = c
-                  bestBox = {
-                    x: outputData[offset + 0],
-                    y: outputData[offset + 1],
-                    w: outputData[offset + 2],
-                    h: outputData[offset + 3]
-                  }
+              if (confidence > maxConf) {
+                maxConf = confidence
+                detectedClass = c
+                bestBox = {
+                  x: outputData[offset + 0],
+                  y: outputData[offset + 1],
+                  w: outputData[offset + 2],
+                  h: outputData[offset + 3]
                 }
               }
             }
-            
-            const classNames = [
-              'code_qr_barcode', 'code_license_plate', 
-              'code_container_h', 'code_container_v', 'text_printed',
-              'code_seal', 'code_lcd_display', 'code_rail_wagon',
-              'code_air_container', 'code_vin'
-            ]
-            
-            console.log(`ONNX Detection: ${classNames[detectedClass] || 'none'} (${(maxConf * 100).toFixed(1)}%)`)
-          } else {
-            console.log('ONNX Result: Invalid output format')
           }
+          
+          const classNames = [
+            'code_qr_barcode', 'code_license_plate', 
+            'code_container_h', 'code_container_v', 'text_printed',
+            'code_seal', 'code_lcd_display', 'code_rail_wagon',
+            'code_air_container', 'code_vin'
+          ]
+          
+          console.log(`ONNX Detection: ${classNames[detectedClass] || 'none'} (${(maxConf * 100).toFixed(1)}%)`)
+        } else {
+          console.log('ONNX Result: Invalid output format')
         }
-      },
-      [actualModel, mode]
-    )
-  } catch (e) {
-    console.log('Frame processors unavailable - running without frame processing')
-  }
+      }
+    },
+    [actualModel, mode, frameProcessorsAvailable]
+  )
 
   React.useEffect(() => {
     requestPermission()
@@ -191,6 +186,14 @@ export default function SwitchableApp(): React.ReactNode {
           isActive={true}
           frameProcessor={frameProcessor}
           pixelFormat="yuv"
+          onError={(error) => {
+            if (error.code === 'system/frame-processors-unavailable') {
+              console.log('Frame processors are unavailable')
+              setFrameProcessorsAvailable(false)
+            } else {
+              console.error('Camera error:', error)
+            }
+          }}
         />
       ) : (
         <Text>No Camera available.</Text>
@@ -224,7 +227,7 @@ export default function SwitchableApp(): React.ReactNode {
       )}
 
       {/* Frame Processors Disabled Warning */}
-      {!frameProcessor && isModelLoaded && (
+      {!frameProcessorsAvailable && isModelLoaded && (
         <View style={styles.warningContainer}>
           <Text style={styles.warningText}>
             Frame processors disabled - no inference running

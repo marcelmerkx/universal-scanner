@@ -1,4 +1,4 @@
-package com.tfliteexample;
+package com.cargosnap.universalscanner;
 
 import android.app.Application;
 import com.facebook.react.PackageList;
