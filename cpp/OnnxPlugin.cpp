@@ -19,13 +19,13 @@
 #include <cstring>
 #include <cstdarg>
 #include <cstdio>
+#include <memory>
 
 #ifdef ANDROID
 #include <android/log.h>
+#include <onnxruntime_cxx_api.h>
+#include <cpu_provider_factory.h>
 #endif
-
-// For now, we'll create a mock ONNX Runtime that simulates the behavior
-// This allows us to test the integration without the actual ONNX Runtime library
 
 using namespace facebook;
 using namespace mrousavy;
@@ -49,9 +49,12 @@ namespace {
   }
 }
 
-// Mock ONNX Runtime session structure
-struct MockOnnxSession {
-  std::string modelPath;
+#ifdef ANDROID
+// Real ONNX Runtime session structure
+struct OnnxSession {
+  std::unique_ptr<Ort::Session> session;
+  std::unique_ptr<Ort::Env> env;
+  Ort::MemoryInfo memoryInfo;
   Provider provider;
   
   // YOLOv8n unified detection model info
@@ -62,51 +65,124 @@ struct MockOnnxSession {
     std::string outputName = "output0";
   } modelInfo;
   
-  MockOnnxSession(const std::string& path, Provider prov) : modelPath(path), provider(prov) {
-    log("Mock ONNX Session created for model: " + path);
-  }
-  
-  // Simulate YOLOv8n inference
-  std::vector<float> runInference(const std::vector<uint8_t>& inputData) {
-    // For YOLOv8n, we expect 640x640x3 input
-    const size_t expectedSize = 640 * 640 * 3;
-    if (inputData.size() != expectedSize) {
-      throw std::runtime_error("Invalid input size. Expected " + std::to_string(expectedSize) + 
-                               " but got " + std::to_string(inputData.size()));
-    }
-    
-    // Create mock output matching YOLOv8n output shape
-    const size_t outputSize = 16 * 8400; // 16 features x 8400 anchors
-    std::vector<float> output(outputSize);
-    
-    // Simulate some detections for testing
-    // Format: [x_center, y_center, width, height, objectness, class0, class1, ..., class10]
-    for (size_t anchor = 0; anchor < 8400; ++anchor) {
-      size_t offset = anchor * 16;
+  OnnxSession(const Buffer& modelData, Provider prov) : memoryInfo(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)), provider(prov) {
+    try {
+      // Create ONNX Runtime environment
+      env = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "UniversalScanner");
       
-      // Mock bounding box (centered, normalized)
-      output[offset + 0] = 0.5f + (anchor % 100) * 0.001f; // x_center
-      output[offset + 1] = 0.5f + (anchor / 100) * 0.001f; // y_center  
-      output[offset + 2] = 0.1f; // width
-      output[offset + 3] = 0.1f; // height
+      // Create session options
+      Ort::SessionOptions sessionOptions;
+      sessionOptions.SetIntraOpNumThreads(1);
       
-      // Mock objectness score
-      output[offset + 4] = (anchor < 10) ? 0.8f : 0.01f; // High confidence for first 10 anchors
-      
-      // Mock class probabilities (11 classes)
-      for (int c = 0; c < 11; ++c) {
-        // Give high probability to class 1 (QR code) for first detection
-        if (anchor == 0 && c == 1) {
-          output[offset + 5 + c] = 0.9f;
-        } else {
-          output[offset + 5 + c] = 0.01f;
+      // Set provider based on request
+      if (provider == Provider::NnApi) {
+        // Try to add NNAPI provider for Android (may not be available in all ONNX Runtime builds)
+        try {
+          sessionOptions.AppendExecutionProvider("NNAPI");
+        } catch (const Ort::Exception& e) {
+          logf("NNAPI provider not available, falling back to CPU: %s", e.what());
         }
       }
+      // CPU provider is always available as fallback
+      
+      // Create session from memory buffer
+      session = std::make_unique<Ort::Session>(*env, modelData.data, modelData.size, sessionOptions);
+      
+      // Get input/output info
+      Ort::AllocatorWithDefaultOptions allocator;
+      
+      // Input info
+      auto inputName = session->GetInputNameAllocated(0, allocator);
+      modelInfo.inputName = inputName.get();
+      
+      auto inputTypeInfo = session->GetInputTypeInfo(0);
+      auto inputTensorInfo = inputTypeInfo.GetTensorTypeAndShapeInfo();
+      modelInfo.inputShape = inputTensorInfo.GetShape();
+      
+      // Output info  
+      auto outputName = session->GetOutputNameAllocated(0, allocator);
+      modelInfo.outputName = outputName.get();
+      
+      auto outputTypeInfo = session->GetOutputTypeInfo(0);
+      auto outputTensorInfo = outputTypeInfo.GetTensorTypeAndShapeInfo();
+      modelInfo.outputShape = outputTensorInfo.GetShape();
+      
+      logf("ONNX Model loaded successfully. Input: %s %ldx%ldx%ldx%ld, Output: %s %ldx%ldx%ld", 
+           modelInfo.inputName.c_str(),
+           modelInfo.inputShape[0], modelInfo.inputShape[1], modelInfo.inputShape[2], modelInfo.inputShape[3],
+           modelInfo.outputName.c_str(),
+           modelInfo.outputShape[0], modelInfo.outputShape[1], modelInfo.outputShape[2]);
+           
+    } catch (const Ort::Exception& e) {
+      throw std::runtime_error("Failed to create ONNX session: " + std::string(e.what()));
     }
-    
+  }
+  
+  // Run real ONNX inference
+  std::vector<float> runInference(const std::vector<uint8_t>& inputData) {
+    try {
+      // Convert uint8 input to float and normalize to [0,1]
+      std::vector<float> floatInput(inputData.size());
+      for (size_t i = 0; i < inputData.size(); ++i) {
+        floatInput[i] = static_cast<float>(inputData[i]) / 255.0f;
+      }
+      
+      // Create input tensor
+      const char* inputNames[] = {modelInfo.inputName.c_str()};
+      const char* outputNames[] = {modelInfo.outputName.c_str()};
+      
+      auto inputTensor = Ort::Value::CreateTensor<float>(
+        memoryInfo, floatInput.data(), floatInput.size(),
+        modelInfo.inputShape.data(), modelInfo.inputShape.size());
+      
+      // Run inference
+      auto outputTensors = session->Run(Ort::RunOptions{nullptr}, inputNames, &inputTensor, 1, outputNames, 1);
+      
+      // Extract output data
+      auto& outputTensor = outputTensors[0];
+      auto* outputData = outputTensor.GetTensorMutableData<float>();
+      auto outputInfo = outputTensor.GetTensorTypeAndShapeInfo();
+      auto outputShape = outputInfo.GetShape();
+      
+      size_t outputSize = 1;
+      for (auto dim : outputShape) {
+        outputSize *= dim;
+      }
+      
+      std::vector<float> output(outputData, outputData + outputSize);
+      
+      logf("ONNX inference completed. Output size: %zu", outputSize);
+      return output;
+      
+    } catch (const Ort::Exception& e) {
+      throw std::runtime_error("ONNX inference failed: " + std::string(e.what()));
+    }
+  }
+};
+#else
+// Fallback mock for non-Android platforms
+struct OnnxSession {
+  std::string modelPath;
+  Provider provider;
+  
+  struct {
+    std::vector<int64_t> inputShape = {1, 3, 640, 640};
+    std::vector<int64_t> outputShape = {1, 16, 8400};
+    std::string inputName = "images";
+    std::string outputName = "output0";
+  } modelInfo;
+  
+  OnnxSession(const Buffer& modelData, Provider prov) : provider(prov) {
+    log("Mock ONNX Session created (non-Android platform)");
+  }
+  
+  std::vector<float> runInference(const std::vector<uint8_t>& inputData) {
+    const size_t outputSize = 16 * 8400;
+    std::vector<float> output(outputSize, 0.0f);
     return output;
   }
 };
+#endif
 
 void OnnxPlugin::installToRuntime(jsi::Runtime& runtime,
                                   std::shared_ptr<react::CallInvoker> callInvoker,
@@ -142,8 +218,8 @@ void OnnxPlugin::installToRuntime(jsi::Runtime& runtime,
               // Fetch model from URL (JS bundle)
               Buffer buffer = fetchURL(modelPath);
 
-              // Create mock ONNX session
-              auto* session = new MockOnnxSession(modelPath, providerType);
+              // Create real ONNX session
+              auto* session = new OnnxSession(buffer, providerType);
               
               if (session == nullptr) {
                 callInvoker->invokeAsync([=]() { 
@@ -182,7 +258,7 @@ OnnxPlugin::OnnxPlugin(void* session, Buffer model, Provider provider,
     throw std::runtime_error("ONNX session is null!");
   }
   
-  log("Successfully created ONNX Plugin with mock session!");
+  log("Successfully created ONNX Plugin with real ONNX session!");
 }
 
 OnnxPlugin::~OnnxPlugin() {
@@ -192,7 +268,7 @@ OnnxPlugin::~OnnxPlugin() {
     _model.size = 0;
   }
   if (_session != nullptr) {
-    delete static_cast<MockOnnxSession*>(_session);
+    delete static_cast<OnnxSession*>(_session);
     _session = nullptr;
   }
 }
@@ -267,7 +343,7 @@ jsi::Value OnnxPlugin::copyOutputBuffers(jsi::Runtime& runtime) {
 }
 
 void OnnxPlugin::run() {
-  auto* session = static_cast<MockOnnxSession*>(_session);
+  auto* session = static_cast<OnnxSession*>(_session);
   if (session == nullptr) {
     throw std::runtime_error("ONNX session is null!");
   }
@@ -314,7 +390,7 @@ jsi::Value OnnxPlugin::get(jsi::Runtime& runtime, const jsi::PropNameID& propNam
           return promise;
         });
   } else if (propName == "inputs") {
-    auto* session = static_cast<MockOnnxSession*>(_session);
+    auto* session = static_cast<OnnxSession*>(_session);
     jsi::Array tensors(runtime, 1);
     
     jsi::Object inputTensor = OnnxHelpers::tensorToJSObject(
@@ -327,7 +403,7 @@ jsi::Value OnnxPlugin::get(jsi::Runtime& runtime, const jsi::PropNameID& propNam
     tensors.setValueAtIndex(runtime, 0, inputTensor);
     return tensors;
   } else if (propName == "outputs") {
-    auto* session = static_cast<MockOnnxSession*>(_session);
+    auto* session = static_cast<OnnxSession*>(_session);
     jsi::Array tensors(runtime, 1);
     
     jsi::Object outputTensor = OnnxHelpers::tensorToJSObject(

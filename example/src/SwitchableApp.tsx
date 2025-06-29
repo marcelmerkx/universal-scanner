@@ -115,54 +115,89 @@ export default function SwitchableApp(): React.ReactNode {
         
         const result = actualModel.runSync([resized])
         
-        // For our mock ONNX implementation, we get a Float32Array
-        const outputData = result[0] as Float32Array
+        // Debug: Log the actual result structure
+        console.log('ONNX result length:', result?.length)
+        console.log('ONNX result[0] type:', typeof result?.[0])
+        console.log('ONNX result[0] keys:', result?.[0] ? Object.keys(result[0]) : 'none')
         
-        if (outputData && outputData.length > 0) {
-          // YOLOv8n output: [1, 16, 8400] -> 16 features x 8400 anchors
-          const numAnchors = 8400
-          const numFeatures = 16 // 4 bbox + 1 obj + 11 classes
-          
-          // Find max confidence detection
+        // ONNX Runtime React Native returns nested arrays, not flat Float32Array
+        const output = result[0]
+        
+        if (output && output.value) {
+          // Find max confidence detection - declare outside try block
           let maxConf = 0
           let detectedClass = -1
           let bestBox = { x: 0, y: 0, w: 0, h: 0 }
           
-          // Iterate through all anchors
-          for (let anchor = 0; anchor < numAnchors; anchor++) {
-            const offset = anchor * numFeatures
+          try {
+            // Extract 3D nested array: [batch, features, anchors] or [batch, anchors, features]
+            const raw3d = output.value as number[][][]
+            const preds2d = raw3d[0] // Remove batch dimension
             
-            // Get objectness score
-            const objectness = outputData[offset + 4]
+            // YOLOv8n unified detection: 16 features (4 bbox + 1 obj + 11 classes) x 8400 anchors
+            const numFeatures = 16
+            const numAnchors = 8400
+            const numClasses = 11
             
-            // Check each class
-            for (let c = 0; c < 11; c++) {
-              const classScore = outputData[offset + 5 + c]
-              const confidence = objectness * classScore
+            // Handle both possible orientations: [FEATURES, ANCHORS] or [ANCHORS, FEATURES]
+            const featuresAlongFirstDim = preds2d.length === numFeatures
+            
+            function getVal(anchorIdx: number, featureIdx: number): number {
+              return featuresAlongFirstDim
+                ? preds2d[featureIdx][anchorIdx]  // [FEATURES, ANCHORS]
+                : preds2d[anchorIdx][featureIdx]  // [ANCHORS, FEATURES]
+            }
+            
+            const maxAnchors = featuresAlongFirstDim ? preds2d[0].length : preds2d.length
+            const actualAnchors = Math.min(maxAnchors, numAnchors)
+            
+            // Iterate through all anchors
+            for (let anchor = 0; anchor < actualAnchors; anchor++) {
+              // Get bounding box
+              const centerX = getVal(anchor, 0)
+              const centerY = getVal(anchor, 1)
+              const width = getVal(anchor, 2)
+              const height = getVal(anchor, 3)
               
-              if (confidence > maxConf) {
-                maxConf = confidence
-                detectedClass = c
-                bestBox = {
-                  x: outputData[offset + 0],
-                  y: outputData[offset + 1],
-                  w: outputData[offset + 2],
-                  h: outputData[offset + 3]
+              // Get objectness score
+              const objectness = getVal(anchor, 4)
+              
+              // Check each class
+              for (let c = 0; c < numClasses; c++) {
+                const classScore = getVal(anchor, 5 + c)
+                const confidence = objectness * classScore
+                
+                if (confidence > maxConf && confidence > 0.1) { // Basic threshold
+                  maxConf = confidence
+                  detectedClass = c
+                  bestBox = {
+                    x: centerX,
+                    y: centerY,
+                    w: width,
+                    h: height
+                  }
                 }
               }
             }
+          } catch (error) {
+            console.log('ONNX parsing error:', error)
+            return
           }
           
           const classNames = [
-            'code_qr_barcode', 'code_license_plate', 
-            'code_container_h', 'code_container_v', 'text_printed',
+            'code_barcode_1d', 'code_qr', 'code_license_plate',
+            'code_container_h', 'code_container_v', 'text_printed', 
             'code_seal', 'code_lcd_display', 'code_rail_wagon',
             'code_air_container', 'code_vin'
           ]
           
-          console.log(`ONNX Detection: ${classNames[detectedClass] || 'none'} (${(maxConf * 100).toFixed(1)}%)`)
+          if (maxConf > 0.1) {
+            console.log(`ONNX Detection: ${classNames[detectedClass] || 'unknown'} (${(maxConf * 100).toFixed(1)}%) at [${bestBox.x.toFixed(0)}, ${bestBox.y.toFixed(0)}, ${bestBox.w.toFixed(0)}, ${bestBox.h.toFixed(0)}]`)
+          } else {
+            console.log('ONNX: No confident detection')
+          }
         } else {
-          console.log('ONNX Result: Invalid output format')
+          console.log('ONNX Result: No output data - output:', output ? 'exists but no value' : 'null')
         }
       }
     },
