@@ -7,7 +7,7 @@
 
 #include "OnnxPlugin.h"
 
-#include "TensorHelpers.h"
+#include "OnnxHelpers.h"
 #include "jsi/Promise.h"
 #include "jsi/TypedArray.h"
 #include <chrono>
@@ -17,6 +17,8 @@
 #include <thread>
 #include <vector>
 #include <cstring>
+#include <cstdarg>
+#include <cstdio>
 
 #ifdef ANDROID
 #include <android/log.h>
@@ -35,6 +37,15 @@ namespace {
     #else
       NSLog(@"OnnxPlugin: %s", message.c_str());
     #endif
+  }
+  
+  void logf(const char* format, ...) {
+    char buffer[512];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    log(std::string(buffer));
   }
 }
 
@@ -108,7 +119,7 @@ void OnnxPlugin::installToRuntime(jsi::Runtime& runtime,
         auto start = std::chrono::steady_clock::now();
         auto modelPath = arguments[0].asString(runtime).utf8(runtime);
 
-        log("Loading ONNX Model from \"%s\"...", modelPath.c_str());
+        logf("Loading ONNX Model from \"%s\"...", modelPath.c_str());
 
         Provider providerType = Provider::Default;
         if (count > 1 && arguments[1].isString()) {
@@ -149,7 +160,7 @@ void OnnxPlugin::installToRuntime(jsi::Runtime& runtime,
               });
 
               auto end = std::chrono::steady_clock::now();
-              log("Successfully loaded ONNX Model in %i ms!",
+              logf("Successfully loaded ONNX Model in %i ms!",
                   std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
             } catch (std::exception& error) {
               std::string message = error.what();
@@ -165,7 +176,7 @@ void OnnxPlugin::installToRuntime(jsi::Runtime& runtime,
 
 OnnxPlugin::OnnxPlugin(void* session, Buffer model, Provider provider,
                        std::shared_ptr<react::CallInvoker> callInvoker)
-    : _session(session), _provider(provider), _model(model), _callInvoker(callInvoker) {
+    : _session(session), _model(model), _provider(provider), _callInvoker(callInvoker) {
   
   if (_session == nullptr) {
     throw std::runtime_error("ONNX session is null!");
@@ -202,7 +213,7 @@ OnnxPlugin::getOutputArrayForSession(jsi::Runtime& runtime, size_t index) {
         .callAsConstructor(runtime, arrayBuffer)
         .asObject(runtime);
         
-    _outputBuffers[name] = std::make_shared<TypedArrayBase>(std::move(float32Array));
+    _outputBuffers[name] = std::make_shared<TypedArrayBase>(runtime, float32Array);
   }
   return _outputBuffers[name];
 }
@@ -228,8 +239,13 @@ void OnnxPlugin::copyInputBuffers(jsi::Runtime& runtime, jsi::Object inputValues
   TypedArrayBase inputBuffer = getTypedArray(runtime, std::move(inputObject));
   
   // Store input data for processing
-  _inputData.resize(inputBuffer.size(runtime));
-  inputBuffer.toContainer(runtime, _inputData);
+  size_t size = inputBuffer.size(runtime);
+  _inputData.resize(size);
+  
+  // Copy data from TypedArray to vector
+  auto arrayBuffer = inputBuffer.getBuffer(runtime);
+  uint8_t* data = arrayBuffer.data(runtime);
+  std::memcpy(_inputData.data(), data, size);
 }
 
 jsi::Value OnnxPlugin::copyOutputBuffers(jsi::Runtime& runtime) {
@@ -241,9 +257,9 @@ jsi::Value OnnxPlugin::copyOutputBuffers(jsi::Runtime& runtime) {
   
   // Copy _outputData to the JS buffer
   if (!_outputData.empty()) {
-    outputBuffer->updateUnsafe(runtime, [&](uint8_t* data) {
-      memcpy(data, _outputData.data(), _outputData.size() * sizeof(float));
-    });
+    auto arrayBuffer = outputBuffer->getBuffer(runtime);
+    uint8_t* data = arrayBuffer.data(runtime);
+    std::memcpy(data, _outputData.data(), _outputData.size() * sizeof(float));
   }
   
   result.setValueAtIndex(runtime, 0, *outputBuffer);
@@ -301,15 +317,12 @@ jsi::Value OnnxPlugin::get(jsi::Runtime& runtime, const jsi::PropNameID& propNam
     auto* session = static_cast<MockOnnxSession*>(_session);
     jsi::Array tensors(runtime, 1);
     
-    jsi::Object inputTensor(runtime);
-    inputTensor.setProperty(runtime, "name", jsi::String::createFromUtf8(runtime, session->modelInfo.inputName));
-    inputTensor.setProperty(runtime, "dataType", jsi::String::createFromUtf8(runtime, "uint8"));
-    
-    jsi::Array shape(runtime, session->modelInfo.inputShape.size());
-    for (size_t i = 0; i < session->modelInfo.inputShape.size(); ++i) {
-      shape.setValueAtIndex(runtime, i, static_cast<double>(session->modelInfo.inputShape[i]));
-    }
-    inputTensor.setProperty(runtime, "shape", shape);
+    jsi::Object inputTensor = OnnxHelpers::tensorToJSObject(
+        runtime, 
+        session->modelInfo.inputName, 
+        "uint8", 
+        session->modelInfo.inputShape
+    );
     
     tensors.setValueAtIndex(runtime, 0, inputTensor);
     return tensors;
@@ -317,15 +330,12 @@ jsi::Value OnnxPlugin::get(jsi::Runtime& runtime, const jsi::PropNameID& propNam
     auto* session = static_cast<MockOnnxSession*>(_session);
     jsi::Array tensors(runtime, 1);
     
-    jsi::Object outputTensor(runtime);
-    outputTensor.setProperty(runtime, "name", jsi::String::createFromUtf8(runtime, session->modelInfo.outputName));
-    outputTensor.setProperty(runtime, "dataType", jsi::String::createFromUtf8(runtime, "float32"));
-    
-    jsi::Array shape(runtime, session->modelInfo.outputShape.size());
-    for (size_t i = 0; i < session->modelInfo.outputShape.size(); ++i) {
-      shape.setValueAtIndex(runtime, i, static_cast<double>(session->modelInfo.outputShape[i]));
-    }
-    outputTensor.setProperty(runtime, "shape", shape);
+    jsi::Object outputTensor = OnnxHelpers::tensorToJSObject(
+        runtime, 
+        session->modelInfo.outputName, 
+        "float32", 
+        session->modelInfo.outputShape
+    );
     
     tensors.setValueAtIndex(runtime, 0, outputTensor);
     return tensors;

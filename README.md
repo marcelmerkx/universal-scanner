@@ -91,8 +91,7 @@ We currently have a **working vertical container code scanner**, including docum
 
 | Type | Description | Example |
 |------|-------------|---------|
-| `code_qr` | 2D QR codes | Product links, WiFi configs |
-| `code_barcode_1d` | Linear barcodes | EAN-13, Code128, UPC |
+| `code_qr_barcode` | Linear barcodes | EAN-13, Code128, UPC, 2D QR codes | Product links|
 | `code_license_plate` | Vehicle plates | ABC-123, 12-AB-34 |
 | `code_container_h` | ISO 6346 horizontal | MSCU1234567 |
 | `code_container_v` | ISO 6346 vertical | MSCU1234567 |
@@ -175,7 +174,7 @@ function ScannerScreen() {
 ```typescript
 <UniversalScanner
   // Specify which code types to detect
-  enabledTypes={['code_qr', 'code_barcode_1d', 'code_license_plate']}
+  enabledTypes={['code_qr_barcode', 'code_license_plate','code_seal']}
   
   // Add regex validation per type
   regexPerType={{

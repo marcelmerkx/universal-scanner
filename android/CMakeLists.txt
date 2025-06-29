@@ -42,9 +42,7 @@ add_library(
   ../cpp/jsi/TypedArray.cpp
   ../cpp/TensorflowPlugin.cpp
   ../cpp/TensorHelpers.cpp
-  ../cpp/OnnxPlugin.cpp
   src/main/cpp/Tflite.cpp
-  src/main/cpp/Onnx.cpp
 )
 
 # Specifies a path to native header files.
@@ -89,7 +87,7 @@ add_library(
   ../cpp/jsi/Promise.cpp
   ../cpp/jsi/TypedArray.cpp
   ../cpp/OnnxPlugin.cpp
-  ../cpp/TensorHelpers.cpp
+  ../cpp/OnnxHelpers.cpp
   src/main/cpp/Onnx.cpp
 )
 
@@ -110,6 +108,7 @@ set_target_properties(onnx PROPERTIES LINKER_LANGUAGE CXX)
 target_link_libraries(
   onnx
   android                         # <-- log
+  log                             # <-- __android_log_print
   ReactAndroid::jsi               # <-- jsi.h
   fbjni::fbjni                    # <-- fbjni.h
   # TODO: Add ONNX Runtime library

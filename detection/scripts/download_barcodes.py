@@ -27,7 +27,7 @@ Usage Examples:
     # Download with custom settings
     python3 detection/scripts/download_barcodes.py \\
         --csv-file path/to/custom.csv \\
-        --output-dir detection/training_data/00_raw/code_barcode_1d \\
+        --output-dir detection/training_data/00_raw/code_qr_barcode \\
         --limit 100
 
     # Download QR codes specifically

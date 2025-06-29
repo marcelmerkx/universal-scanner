@@ -79,94 +79,100 @@ export default function SwitchableApp(): React.ReactNode {
 
   const { resize } = useResizePlugin()
 
-  const frameProcessor = useFrameProcessor(
-    (frame) => {
-      'worklet'
-      if (actualModel == null) {
-        // model is still loading...
-        return
-      }
+  // Try to use frame processor, but handle the case when it's unavailable
+  let frameProcessor = undefined
+  try {
+    frameProcessor = useFrameProcessor(
+      (frame) => {
+        'worklet'
+        if (actualModel == null) {
+          // model is still loading...
+          return
+        }
 
-      console.log(`Running ${mode} inference on ${frame}`)
-      
-      if (mode === 'tflite') {
-        const resized = resize(frame, {
-          scale: {
-            width: 320,
-            height: 320,
-          },
-          pixelFormat: 'rgb',
-          dataType: 'uint8',
-        })
-        const result = actualModel.runSync([resized])
-        const num_detections = result[3]?.[0] ?? 0
-        console.log('TFLite Result: ' + num_detections)
-      } else {
-        // ONNX mode - YOLOv8n unified detection
-        const resized = resize(frame, {
-          scale: {
-            width: 640, // YOLOv8 typically uses 640x640
-            height: 640,
-          },
-          pixelFormat: 'rgb',
-          dataType: 'uint8',
-        })
+        console.log(`Running ${mode} inference on ${frame}`)
         
-        const result = actualModel.runSync([resized])
-        
-        // For our mock ONNX implementation, we get a Float32Array
-        const outputData = result[0] as Float32Array
-        
-        if (outputData && outputData.length > 0) {
-          // YOLOv8n output: [1, 16, 8400] -> 16 features x 8400 anchors
-          const numAnchors = 8400
-          const numFeatures = 16 // 4 bbox + 1 obj + 11 classes
+        if (mode === 'tflite') {
+          const resized = resize(frame, {
+            scale: {
+              width: 320,
+              height: 320,
+            },
+            pixelFormat: 'rgb',
+            dataType: 'uint8',
+          })
+          const result = actualModel.runSync([resized])
+          const num_detections = result[3]?.[0] ?? 0
+          console.log('TFLite Result: ' + num_detections)
+        } else {
+          // ONNX mode - YOLOv8n unified detection
+          const resized = resize(frame, {
+            scale: {
+              width: 640, // YOLOv8 typically uses 640x640
+              height: 640,
+            },
+            pixelFormat: 'rgb',
+            dataType: 'uint8',
+          })
           
-          // Find max confidence detection
-          let maxConf = 0
-          let detectedClass = -1
-          let bestBox = { x: 0, y: 0, w: 0, h: 0 }
+          const result = actualModel.runSync([resized])
           
-          // Iterate through all anchors
-          for (let anchor = 0; anchor < numAnchors; anchor++) {
-            const offset = anchor * numFeatures
+          // For our mock ONNX implementation, we get a Float32Array
+          const outputData = result[0] as Float32Array
+          
+          if (outputData && outputData.length > 0) {
+            // YOLOv8n output: [1, 16, 8400] -> 16 features x 8400 anchors
+            const numAnchors = 8400
+            const numFeatures = 16 // 4 bbox + 1 obj + 11 classes
             
-            // Get objectness score
-            const objectness = outputData[offset + 4]
+            // Find max confidence detection
+            let maxConf = 0
+            let detectedClass = -1
+            let bestBox = { x: 0, y: 0, w: 0, h: 0 }
             
-            // Check each class
-            for (let c = 0; c < 11; c++) {
-              const classScore = outputData[offset + 5 + c]
-              const confidence = objectness * classScore
+            // Iterate through all anchors
+            for (let anchor = 0; anchor < numAnchors; anchor++) {
+              const offset = anchor * numFeatures
               
-              if (confidence > maxConf) {
-                maxConf = confidence
-                detectedClass = c
-                bestBox = {
-                  x: outputData[offset + 0],
-                  y: outputData[offset + 1],
-                  w: outputData[offset + 2],
-                  h: outputData[offset + 3]
+              // Get objectness score
+              const objectness = outputData[offset + 4]
+              
+              // Check each class
+              for (let c = 0; c < 11; c++) {
+                const classScore = outputData[offset + 5 + c]
+                const confidence = objectness * classScore
+                
+                if (confidence > maxConf) {
+                  maxConf = confidence
+                  detectedClass = c
+                  bestBox = {
+                    x: outputData[offset + 0],
+                    y: outputData[offset + 1],
+                    w: outputData[offset + 2],
+                    h: outputData[offset + 3]
+                  }
                 }
               }
             }
+            
+            const classNames = [
+              'code_qr_barcode', 'code_license_plate', 
+              'code_container_h', 'code_container_v', 'text_printed',
+              'code_seal', 'code_lcd_display', 'code_rail_wagon',
+              'code_air_container', 'code_vin'
+            ]
+            
+            console.log(`ONNX Detection: ${classNames[detectedClass] || 'none'} (${(maxConf * 100).toFixed(1)}%)`)
+          } else {
+            console.log('ONNX Result: Invalid output format')
           }
-          
-          const classNames = [
-            'code_barcode_1d', 'code_qr', 'code_license_plate', 
-            'code_container_h', 'code_container_v', 'text_printed',
-            'code_seal', 'code_lcd_display', 'code_rail_wagon',
-            'code_air_container', 'code_vin'
-          ]
-          
-          console.log(`ONNX Detection: ${classNames[detectedClass] || 'none'} (${(maxConf * 100).toFixed(1)}%)`)
-        } else {
-          console.log('ONNX Result: Invalid output format')
         }
-      }
-    },
-    [actualModel, mode]
-  )
+      },
+      [actualModel, mode]
+    )
+  } catch (e) {
+    console.log('Frame processors unavailable - running without frame processing')
+  }
 
   React.useEffect(() => {
     requestPermission()
@@ -216,6 +222,15 @@ export default function SwitchableApp(): React.ReactNode {
           </Text>
         </View>
       )}
+
+      {/* Frame Processors Disabled Warning */}
+      {!frameProcessor && isModelLoaded && (
+        <View style={styles.warningContainer}>
+          <Text style={styles.warningText}>
+            Frame processors disabled - no inference running
+          </Text>
+        </View>
+      )}
     </View>
   )
 }
@@ -260,6 +275,17 @@ const styles = StyleSheet.create({
     maxWidth: '80%',
   },
   errorText: {
+    color: 'white',
+  },
+  warningContainer: {
+    position: 'absolute',
+    bottom: 100,
+    backgroundColor: 'rgba(255, 165, 0, 0.7)',
+    padding: 10,
+    borderRadius: 5,
+    maxWidth: '80%',
+  },
+  warningText: {
     color: 'white',
   },
 })

@@ -28,7 +28,7 @@ Usage Examples:
     # Download barcodes
     python3 detection/scripts/download_containers.py \\
         --csv-file detection/training_data/00_raw/barcodes.csv \\
-        --output-dir detection/training_data/00_raw/code_barcode_1d
+        --output-dir detection/training_data/00_raw/code_qr_barcode
     
     # Download QR codes with limit
     python3 detection/scripts/download_containers.py \\

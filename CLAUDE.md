@@ -16,8 +16,7 @@ This is a universal scanner mobile app built with React Native that detects and 
 ## Supported Code Types
 
 The scanner supports 11 different code types with specific class names:
-- `code_barcode_1d` — Linear barcodes (EAN, Code128)
-- `code_qr` — 2D QR codes
+- `code_qr_barcode` — 2D QR codes
 - `code_license_plate` — Alphanumeric plates (generic)
 - `code_container_h` — ISO 6346 container codes (horizontal)
 - `code_container_v` — ISO 6346 container codes (vertical)

@@ -81,7 +81,7 @@ The app includes several configuration options:
 ```typescript
 // In App.tsx
 const SCANNER_CONFIG = {
-  enabledTypes: ['code_qr', 'code_barcode_1d', 'code_container_h'],
+  enabledTypes: ['code_qr', 'code_qr_barcode', 'code_container_h'],
   verbose: true,
   manualMode: false,
   regexPerType: {

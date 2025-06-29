@@ -73,6 +73,6 @@ public:
 } // namespace mrousavy
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {
-  java_machine_onnx = vm;
+  mrousavy::java_machine_onnx = vm;
   return facebook::jni::initialize(vm, [] { mrousavy::OnnxModule::registerNatives(); });
 }
