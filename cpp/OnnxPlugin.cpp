@@ -118,52 +118,68 @@ struct OnnxSession {
     }
   }
   
-  // Run real ONNX inference
+  // Run ONNX inference with native white padding (translated from Kotlin)
   std::vector<float> runInference(const std::vector<uint8_t>& inputData) {
     try {
-      // Input is HWC format from resize plugin, need to convert to CHW for ONNX
-      const size_t height = 640;
-      const size_t width = 640;
       const size_t channels = 3;
+      const size_t targetSize = 640; // Model expects 640x640
       
-      // Convert uint8 HWC to float CHW and normalize to [0,1]
-      std::vector<float> floatInput(inputData.size());
+      // Detect input dimensions from data size (rotated frame)
+      const size_t totalPixels = inputData.size() / channels;
       
-      // Debug: Check input data range before normalization
-      uint8_t minVal = 255, maxVal = 0;
-      uint32_t sum = 0;
-      const size_t sampleSize = std::min(size_t(1000), inputData.size());
-      for (size_t i = 0; i < sampleSize; i++) {
-        uint8_t val = inputData[i];
-        minVal = std::min(minVal, val);
-        maxVal = std::max(maxVal, val);
-        sum += val;
+      // Common rotated dimensions: 640x480, 960x720, 1440x1080, etc.
+      size_t inputHeight = 0, inputWidth = 0;
+      
+      // Determine dimensions (same logic as before but cleaner)
+      if (totalPixels == 640 * 480) {
+        inputHeight = 640; inputWidth = 480;
+      } else if (totalPixels == 960 * 720) {
+        inputHeight = 960; inputWidth = 720;
+      } else if (totalPixels == 1440 * 1080) {
+        inputHeight = 1440; inputWidth = 1080;
+      } else {
+        // Fallback: assume 4:3 ratio after rotation
+        inputHeight = static_cast<size_t>(std::sqrt(totalPixels * 4.0 / 3.0));
+        inputWidth = totalPixels / inputHeight;
       }
-      float avgVal = static_cast<float>(sum) / sampleSize;
-      logf("C++ Input BEFORE norm (first %zu): min=%d, max=%d, avg=%.1f", sampleSize, minVal, maxVal, avgVal);
       
-      // Transpose from HWC to CHW and normalize
-      float minNorm = 1.0f, maxNorm = 0.0f;
-      float sumNorm = 0.0f;
+      logf("Native padding: input %zux%zu (%zu pixels)", inputWidth, inputHeight, totalPixels);
+      
+      // Calculate aspect-ratio preserving scale (same as Kotlin)
+      float scale = std::min(static_cast<float>(targetSize) / inputWidth,
+                            static_cast<float>(targetSize) / inputHeight);
+      size_t scaledWidth = static_cast<size_t>(inputWidth * scale);
+      size_t scaledHeight = static_cast<size_t>(inputHeight * scale);
+      
+      logf("Scale factor: %.3f, scaled to %zux%zu", scale, scaledWidth, scaledHeight);
+      logf("Padding: right=%zu, bottom=%zu", targetSize - scaledWidth, targetSize - scaledHeight);
+      
+      // Create white-filled tensor [C, H, W] (same as Kotlin white canvas)
+      std::vector<float> floatInput(channels * targetSize * targetSize, 1.0f);
+      
+      // Copy scaled image data to top-left (same as Kotlin drawBitmap at 0,0)
       for (size_t c = 0; c < channels; ++c) {
-        for (size_t h = 0; h < height; ++h) {
-          for (size_t w = 0; w < width; ++w) {
-            size_t hwcIdx = (h * width + w) * channels + c;  // HWC index
-            size_t chwIdx = c * (height * width) + h * width + w;  // CHW index
-            float normalized = static_cast<float>(inputData[hwcIdx]) / 255.0f; // Normalize to [0,1]
-            floatInput[chwIdx] = normalized;
+        for (size_t y = 0; y < scaledHeight; ++y) {
+          for (size_t x = 0; x < scaledWidth; ++x) {
+            // Source pixel coordinates with bilinear-style mapping
+            size_t srcY = static_cast<size_t>(y / scale);
+            size_t srcX = static_cast<size_t>(x / scale);
             
-            // Track normalized range for first 1000 pixels
-            if (chwIdx < sampleSize) {
-              minNorm = std::min(minNorm, normalized);
-              maxNorm = std::max(maxNorm, normalized);
-              sumNorm += normalized;
-            }
+            // Clamp to input bounds
+            srcY = std::min(srcY, inputHeight - 1);
+            srcX = std::min(srcX, inputWidth - 1);
+            
+            // Source: HWC format
+            size_t srcIdx = (srcY * inputWidth + srcX) * channels + c;
+            
+            // Destination: CHW format, top-left aligned
+            size_t dstIdx = c * (targetSize * targetSize) + y * targetSize + x;
+            
+            // Normalize and copy (same as Kotlin /255f)
+            floatInput[dstIdx] = static_cast<float>(inputData[srcIdx]) / 255.0f;
           }
         }
       }
-      float avgNorm = sumNorm / sampleSize;
-      logf("C++ Input AFTER norm (first %zu): min=%.3f, max=%.3f, avg=%.3f", sampleSize, minNorm, maxNorm, avgNorm);
       
       // Create input tensor
       const char* inputNames[] = {modelInfo.inputName.c_str()};

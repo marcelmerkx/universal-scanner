@@ -123,41 +123,11 @@ export default function SwitchableApp(): React.ReactNode {
         // ONNX mode - YOLOv8n unified detection
         console.log(`Camera frame: ${frame.width}x${frame.height}`)
         
-        // TEMPORARY: Use full frame with distortion to test if cropping is the issue
-        // This will stretch 640x480 to 640x640 but preserve all content
-        const resized = resize(frame, {
-          crop: {
-            x: 0,
-            y: 0, 
-            width: frame.width,
-            height: frame.height
-          },
-          scale: {
-            width: 640,
-            height: 640,
-          },
-          rotation: '90deg',  // Rotate 90° clockwise to match model expectation
-          pixelFormat: 'rgb',
-          dataType: 'uint8',
-        })
+        // Pass raw frame directly to C++ for ALL preprocessing (no JS bridge overhead)
+        console.log(`Raw frame to native: ${frame.width}x${frame.height}`)
         
-        // Debug: Check input data statistics
-        if (resized) {
-          let min = 255, max = 0, sum = 0
-          const sampleSize = Math.min(1000, resized.length)
-          for (let i = 0; i < sampleSize; i++) {
-            const val = resized[i]
-            if (val !== undefined) {
-              min = Math.min(min, val)
-              max = Math.max(max, val) 
-              sum += val
-            }
-          }
-          const avg = sum / sampleSize
-          console.log(`Input stats (first ${sampleSize} pixels): min=${min}, max=${max}, avg=${avg.toFixed(1)}`)
-        }
-        
-        const result = actualModel.runSync([resized])
+        // Direct frame processing in C++ - no vision-camera-resize-plugin needed!
+        const result = actualModel.runSync([frame])
         
         // Debug: Log the actual result structure to understand what we're getting
         if (result && result[0]) {
@@ -552,22 +522,33 @@ export default function SwitchableApp(): React.ReactNode {
         const screenWidth = Dimensions.get('window').width
         const screenHeight = Dimensions.get('window').height
         
-        // Coordinate transformation with stretch compensation
-        // Problem: 640x480 → rotate → 480x640 → resize → 640x640
-        // This stretches X dimension by 640/480 = 1.33x
+        // Native white padding coordinate transformation 
+        // C++ does proper aspect-ratio preserving padding with top-left alignment
+        // We need to map from 640x640 model space back to screen, accounting for the padding
         
-        const stretchFactorX = 640 / 480  // 1.33 - make width wider to compensate
-        const stretchFactorY = 640 / 640  // 1.0 - no vertical stretch
+        const modelSize = 640
         
-        // Apply stretch compensation to coordinates
+        // Calculate the same scale factor that C++ used for padding
+        // Assume typical rotated camera dimensions (will make dynamic later)
+        const rotatedHeight = 640  // Camera width becomes height after 90° rotation
+        const rotatedWidth = 480   // Camera height becomes width after 90° rotation
+        
+        const paddingScale = Math.min(modelSize / rotatedWidth, modelSize / rotatedHeight)
+        const scaledWidth = rotatedWidth * paddingScale
+        const scaledHeight = rotatedHeight * paddingScale
+        
+        console.log(`Native padding scale: ${paddingScale.toFixed(3)}, scaled to ${scaledWidth.toFixed(0)}x${scaledHeight.toFixed(0)}`)
+        
+        // Model coordinates are in 640x640 space where image occupies top-left region
+        // No correction needed - coordinates should map directly since we have proper padding
         const compensatedX = detection.bbox.x
         const compensatedY = detection.bbox.y  
-        const compensatedWidth = detection.bbox.w * stretchFactorX   // Make width wider
-        const compensatedHeight = detection.bbox.h * stretchFactorY
+        const compensatedWidth = detection.bbox.w
+        const compensatedHeight = detection.bbox.h
         
         // Scale to screen dimensions
-        const scaleX = screenWidth / 640
-        const scaleY = screenHeight / 640
+        const scaleX = screenWidth / modelSize
+        const scaleY = screenHeight / modelSize
         
         // Convert center coordinates to top-left
         const left = (compensatedX - compensatedWidth / 2) * scaleX
@@ -575,7 +556,7 @@ export default function SwitchableApp(): React.ReactNode {
         const width = compensatedWidth * scaleX
         const height = compensatedHeight * scaleY
         
-        console.log(`Input-rotated transform: model(${detection.bbox.x.toFixed(0)},${detection.bbox.y.toFixed(0)},${detection.bbox.w.toFixed(0)},${detection.bbox.h.toFixed(0)}) → screen(${left.toFixed(0)},${top.toFixed(0)},${width.toFixed(0)},${height.toFixed(0)})`)
+        console.log(`Native-padded transform: model(${detection.bbox.x.toFixed(0)},${detection.bbox.y.toFixed(0)},${detection.bbox.w.toFixed(0)},${detection.bbox.h.toFixed(0)}) → screen(${left.toFixed(0)},${top.toFixed(0)},${width.toFixed(0)},${height.toFixed(0)})`)
         
         return (
           <View
