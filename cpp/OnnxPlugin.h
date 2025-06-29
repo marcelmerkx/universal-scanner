@@ -51,6 +51,8 @@ private:
   Provider _provider;
   std::shared_ptr<react::CallInvoker> _callInvoker;
   std::map<std::string, std::shared_ptr<TypedArrayBase>> _outputBuffers;
+  std::vector<uint8_t> _inputData;
+  std::vector<float> _outputData;
 
   void copyInputBuffers(jsi::Runtime& runtime, jsi::Object inputValues);
   jsi::Value copyOutputBuffers(jsi::Runtime& runtime);

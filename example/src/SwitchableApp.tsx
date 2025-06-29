@@ -114,38 +114,39 @@ export default function SwitchableApp(): React.ReactNode {
         
         const result = actualModel.runSync([resized])
         
-        // Handle ONNX nested array output format
-        const raw3d = result[0] as unknown as number[][][]
-        if (raw3d && raw3d[0]) {
-          const preds2d = raw3d[0] // Shape: [9, 8400] or [8400, 9]
-          const attributes = 16 // 4 bbox + 11 classes + 1 objectness for unified model
-          const predsAlongLastDim = preds2d[0].length !== attributes
+        // For our mock ONNX implementation, we get a Float32Array
+        const outputData = result[0] as Float32Array
+        
+        if (outputData && outputData.length > 0) {
+          // YOLOv8n output: [1, 16, 8400] -> 16 features x 8400 anchors
+          const numAnchors = 8400
+          const numFeatures = 16 // 4 bbox + 1 obj + 11 classes
           
           // Find max confidence detection
           let maxConf = 0
           let detectedClass = -1
+          let bestBox = { x: 0, y: 0, w: 0, h: 0 }
           
-          if (predsAlongLastDim) {
-            // [ATTRIBUTES, N] format
-            for (let i = 0; i < preds2d[0].length; i++) {
-              const objectness = preds2d[4][i] // objectness score
-              for (let c = 5; c < 16; c++) {
-                const classConf = preds2d[c][i] * objectness
-                if (classConf > maxConf) {
-                  maxConf = classConf
-                  detectedClass = c - 5
-                }
-              }
-            }
-          } else {
-            // [N, ATTRIBUTES] format
-            for (let i = 0; i < preds2d.length; i++) {
-              const objectness = preds2d[i][4] // objectness score
-              for (let c = 5; c < 16; c++) {
-                const classConf = preds2d[i][c] * objectness
-                if (classConf > maxConf) {
-                  maxConf = classConf
-                  detectedClass = c - 5
+          // Iterate through all anchors
+          for (let anchor = 0; anchor < numAnchors; anchor++) {
+            const offset = anchor * numFeatures
+            
+            // Get objectness score
+            const objectness = outputData[offset + 4]
+            
+            // Check each class
+            for (let c = 0; c < 11; c++) {
+              const classScore = outputData[offset + 5 + c]
+              const confidence = objectness * classScore
+              
+              if (confidence > maxConf) {
+                maxConf = confidence
+                detectedClass = c
+                bestBox = {
+                  x: outputData[offset + 0],
+                  y: outputData[offset + 1],
+                  w: outputData[offset + 2],
+                  h: outputData[offset + 3]
                 }
               }
             }
