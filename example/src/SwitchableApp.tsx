@@ -16,6 +16,7 @@ import {
   OnnxTensor,
   OnnxModel,
   useOnnxModel,
+  universalScanner,
 } from 'react-native-fast-tflite'
 import {
   Camera,
@@ -64,17 +65,23 @@ export default function SwitchableApp(): React.ReactNode {
   const onnxModel = useOnnxModel(require('../assets/unified-detection-v7.onnx'), 'cpu')
   
   // Select active model based on mode
-  const isModelLoaded = mode === 'tflite' 
-    ? tfliteModel.state === 'loaded'
-    : onnxModel.state === 'loaded'
+  const isModelLoaded = mode === 'native' 
+    ? true // Native mode doesn't need JS model loading - uses shared ONNX session
+    : mode === 'tflite' 
+      ? tfliteModel.state === 'loaded'
+      : onnxModel.state === 'loaded'
     
-  const actualModel = mode === 'tflite'
-    ? (tfliteModel.state === 'loaded' ? tfliteModel.model : undefined)
-    : (onnxModel.state === 'loaded' ? onnxModel.model : undefined)
+  const actualModel = mode === 'native'
+    ? null // Native mode doesn't use JS model
+    : mode === 'tflite'
+      ? (tfliteModel.state === 'loaded' ? tfliteModel.model : undefined)
+      : (onnxModel.state === 'loaded' ? onnxModel.model : undefined)
     
-  const modelError = mode === 'tflite'
-    ? (tfliteModel.state === 'error' ? tfliteModel.error : undefined)
-    : (onnxModel.state === 'error' ? onnxModel.error : undefined)
+  const modelError = mode === 'native'
+    ? undefined // Native mode doesn't have JS model errors
+    : mode === 'tflite'
+      ? (tfliteModel.state === 'error' ? tfliteModel.error : undefined)
+      : (onnxModel.state === 'error' ? onnxModel.error : undefined)
 
   React.useEffect(() => {
     if (actualModel == null) return
@@ -100,13 +107,16 @@ export default function SwitchableApp(): React.ReactNode {
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet'
-      if (!frameProcessorsAvailable || actualModel == null) {
-        // frame processors disabled or model is still loading...
+      if (!frameProcessorsAvailable) {
+        // frame processors disabled
+        return
+      }
+      
+      if (mode !== 'native' && actualModel == null) {
+        // model is still loading for tflite/onnx modes
         return
       }
 
-      console.log(`Running ${mode} inference on ${frame}`)
-      
       if (mode === 'tflite') {
         const resized = resize(frame, {
           scale: {
@@ -119,32 +129,23 @@ export default function SwitchableApp(): React.ReactNode {
         const result = actualModel.runSync([resized])
         const num_detections = result[3]?.[0] ?? 0
         console.log('TFLite Result: ' + num_detections)
-      } else {
-        // ONNX mode - YOLOv8n unified detection with real camera data
-        console.log(`Camera frame: ${frame.width}x${frame.height}`)
-        
-        // Use vision-camera-resize-plugin for now to get real camera data
-        // (Native preprocessing will be implemented later with proper frame processor plugin)
+      } else if (mode === 'onnx') {
+        // ONNX mode - YOLOv8n unified detection 
+        // TODO: Native preprocessing requires VisionCamera frame processor plugin
+        // Fallback to resize plugin for now
         const resized = resize(frame, {
           scale: {
             width: 640,
             height: 640,
           },
-          rotation: '90deg',  // Rotate 90° clockwise to match model expectation
+          rotation: '90deg',
           pixelFormat: 'rgb',
           dataType: 'uint8',
         })
         
         const result = actualModel.runSync([resized])
         
-        // Debug: Log the actual result structure to understand what we're getting
-        if (result && result[0]) {
-          console.log('ONNX result[0] type:', typeof result[0])
-          console.log('ONNX result[0] isArray:', Array.isArray(result[0]))
-          if (typeof result[0] === 'object' && !Array.isArray(result[0])) {
-            console.log('ONNX result[0] keys:', Object.keys(result[0]))
-          }
-        }
+        // Native preprocessing completed - detailed logs are in native logcat
         
         // ONNX Runtime React Native returns nested arrays via output.value (per ONNX-OUTPUT-FORMAT-DISCOVERY.md)
         if (result && result[0]) {
@@ -458,6 +459,59 @@ export default function SwitchableApp(): React.ReactNode {
           }
         } else {
           console.log('ONNX Result: No output.value - result exists:', !!result, 'result[0] exists:', !!result?.[0], 'result[0].value exists:', !!result?.[0]?.value)
+        }
+      } else if (mode === 'native') {
+        // Native mode - Use the UniversalScanner frame processor plugin directly
+        // This bypasses all JS overhead and runs everything natively in C++
+        
+        // First check if universalScanner is available
+        if (typeof universalScanner !== 'function') {
+          console.log('❌ universalScanner function not available:', typeof universalScanner)
+          console.log('Available global functions:', Object.getOwnPropertyNames(global).filter(n => typeof (global as any)[n] === 'function'))
+          return
+        }
+        
+        // Also check if ONNX model is loaded (required for native mode)
+        if (onnxModel.state !== 'loaded') {
+          console.log('❌ Native mode requires ONNX model to be loaded first. Current state:', onnxModel.state)
+          return
+        }
+        
+        try {
+          const nativeResult = universalScanner(frame, {
+            enabledTypes: ['code_qr_barcode', 'code_container_h', 'code_container_v', 'code_license_plate', 'text_printed'],
+            verbose: true,
+          })
+          
+          console.log('🚀 Native universalScanner result:', nativeResult)
+          
+          if (nativeResult && nativeResult.results && nativeResult.results.length > 0) {
+            // Convert to our Detection format for visualization
+            const detections: Detection[] = nativeResult.results.map((result: any) => ({
+              className: result.type,
+              confidence: result.confidence,
+              bbox: {
+                x: result.bbox.x,
+                y: result.bbox.y,
+                w: result.bbox.width,
+                h: result.bbox.height
+              }
+            }))
+            
+            console.log(`✅ Native: Found ${detections.length} detections`)
+            updateDetectionsJS(detections)
+          } else {
+            console.log('❌ Native: No detections found')
+            updateDetectionsJS([])
+          }
+        } catch (error) {
+          console.log('❌ Native universalScanner error:', error)
+          console.log('Error details:', JSON.stringify(error, null, 2))
+          if (error instanceof Error) {
+            console.log('Error message:', error.message)
+            console.log('Error stack:', error.stack)
+          }
+          updateDetectionsJS([])
         }
       }
     },

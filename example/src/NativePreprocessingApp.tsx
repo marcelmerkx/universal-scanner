@@ -6,15 +6,23 @@ import {
   useCameraPermission,
   useFrameProcessor,
   Frame,
+  VisionCameraProxy,
 } from 'react-native-vision-camera'
-import { universalScanner, ScannerResult } from 'react-native-fast-tflite'
+import { ScannerResult } from 'react-native-fast-tflite'
 import { Worklets } from 'react-native-worklets-core'
 
 export default function NativePreprocessingApp(): React.ReactNode {
   const { hasPermission, requestPermission } = useCameraPermission()
   const device = useCameraDevice('back')
-  const [lastResult, setLastResult] = React.useState<ScannerResult | null>(null)
+  const [lastResult, setLastResult] = React.useState<any>(null)
   const [fps, setFps] = React.useState(0)
+  
+  // Initialize VisionCamera plugin
+  const universalScanner = VisionCameraProxy.initFrameProcessorPlugin('universalScanner')
+  
+  React.useEffect(() => {
+    console.log('universalScanner plugin initialized:', typeof universalScanner, universalScanner)
+  }, [universalScanner])
   
   // Track FPS
   const frameCount = React.useRef(0)
@@ -32,7 +40,7 @@ export default function NativePreprocessingApp(): React.ReactNode {
     }
   })
   
-  const onScanResult = Worklets.createRunOnJS((result: ScannerResult) => {
+  const onScanResult = Worklets.createRunOnJS((result: any) => {
     setLastResult(result)
     console.log('Scan result:', result)
   })
@@ -44,17 +52,33 @@ export default function NativePreprocessingApp(): React.ReactNode {
       // Update FPS counter
       updateFps()
       
-      // Run the universal scanner with native preprocessing
-      const result = universalScanner(frame, {
-        enabledTypes: ['code_qr_barcode', 'code_container_h', 'code_container_v'],
-        verbose: true,
-      })
-      
-      if (result && result.results.length > 0) {
-        onScanResult(result)
+      try {
+        console.log('About to call universalScanner, type:', typeof universalScanner)
+        
+        if (!universalScanner || typeof universalScanner.call !== 'function') {
+          console.log('universalScanner.call is not available:', universalScanner)
+          return
+        }
+        
+        // Run the universal scanner with native preprocessing using VisionCamera plugin
+        const result = universalScanner.call(frame, {
+          enabledTypes: ['code_qr_barcode', 'code_container_h', 'code_container_v'],
+          verbose: true,
+        })
+        
+        console.log('VisionCamera universalScanner result:', result)
+        
+        if (result) {
+          onScanResult(result)
+        }
+      } catch (error) {
+        console.log('VisionCamera universalScanner error:', error)
+        console.log('Error type:', typeof error)
+        console.log('Error message:', error?.message)
+        console.log('Error stack:', error?.stack)
       }
     },
-    []
+    [universalScanner]
   )
 
   React.useEffect(() => {
@@ -66,8 +90,14 @@ export default function NativePreprocessingApp(): React.ReactNode {
     
     return (
       <View style={styles.resultContainer}>
-        <Text style={styles.resultTitle}>Detections:</Text>
-        {lastResult.results.map((result, index) => (
+        <Text style={styles.resultTitle}>VisionCamera Plugin Result:</Text>
+        <Text style={styles.detectionValue}>
+          Status: {lastResult.status || lastResult.error || 'Unknown'}
+        </Text>
+        <Text style={styles.detectionValue}>
+          Message: {lastResult.message || lastResult.error || 'No message'}
+        </Text>
+        {lastResult.results && lastResult.results.map((result: any, index: number) => (
           <View key={index} style={styles.detection}>
             <Text style={styles.detectionType}>{result.type}</Text>
             <Text style={styles.detectionValue}>{result.value}</Text>
@@ -76,10 +106,6 @@ export default function NativePreprocessingApp(): React.ReactNode {
             </Text>
           </View>
         ))}
-        <Text style={styles.paddingInfo}>
-          Padding: {lastResult.paddingInfo.scaledWidth}x{lastResult.paddingInfo.scaledHeight} 
-          (scale: {lastResult.paddingInfo.scale.toFixed(2)})
-        </Text>
       </View>
     )
   }
