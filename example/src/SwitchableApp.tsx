@@ -26,7 +26,7 @@ import {
 import { useResizePlugin } from 'vision-camera-resize-plugin'
 import { Worklets } from 'react-native-worklets-core'
 
-type InferenceMode = 'tflite' | 'onnx'
+type InferenceMode = 'tflite' | 'onnx' | 'native'
 
 interface Detection {
   className: string
@@ -55,7 +55,7 @@ function onnxModelToString(model: OnnxModel): string {
 }
 
 export default function SwitchableApp(): React.ReactNode {
-  const [mode, setMode] = React.useState<InferenceMode>('onnx')
+  const [mode, setMode] = React.useState<InferenceMode>('native')
   const { hasPermission, requestPermission } = useCameraPermission()
   const device = useCameraDevice('back')
 
@@ -120,14 +120,22 @@ export default function SwitchableApp(): React.ReactNode {
         const num_detections = result[3]?.[0] ?? 0
         console.log('TFLite Result: ' + num_detections)
       } else {
-        // ONNX mode - YOLOv8n unified detection
+        // ONNX mode - YOLOv8n unified detection with real camera data
         console.log(`Camera frame: ${frame.width}x${frame.height}`)
         
-        // Pass raw frame directly to C++ for ALL preprocessing (no JS bridge overhead)
-        console.log(`Raw frame to native: ${frame.width}x${frame.height}`)
+        // Use vision-camera-resize-plugin for now to get real camera data
+        // (Native preprocessing will be implemented later with proper frame processor plugin)
+        const resized = resize(frame, {
+          scale: {
+            width: 640,
+            height: 640,
+          },
+          rotation: '90deg',  // Rotate 90° clockwise to match model expectation
+          pixelFormat: 'rgb',
+          dataType: 'uint8',
+        })
         
-        // Direct frame processing in C++ - no vision-camera-resize-plugin needed!
-        const result = actualModel.runSync([frame])
+        const result = actualModel.runSync([resized])
         
         // Debug: Log the actual result structure to understand what we're getting
         if (result && result[0]) {
@@ -213,34 +221,11 @@ export default function SwitchableApp(): React.ReactNode {
             const maxAnchors = featuresAlongFirstDim ? (preds2d[0]?.length ?? 0) : preds2d.length
             actualAnchors = Math.min(maxAnchors, numAnchors)
             
-            // Debug: Sample first few anchors to see confidence ranges
-            const debugAnchors = Math.min(5, actualAnchors)
+            // Minimal debugging to avoid performance issues
             console.log('featuresAlongFirstDim:', featuresAlongFirstDim)
-            for (let i = 0; i < debugAnchors; i++) {
-              // Debug what we're actually accessing
-              const bbox = [
-                getVal!(i, 0),
-                getVal!(i, 1), 
-                getVal!(i, 2),
-                getVal!(i, 3)
-              ]
-              console.log(`ONNX anchor ${i} bbox:`, bbox.map(v => v.toFixed(2)).join(', '))
-              
-              const scores = []
-              for (let c = 0; c < numClasses; c++) {
-                const logit = getVal!(i, 4 + c)
-                const prob = 1 / (1 + Math.exp(-logit)) // Apply sigmoid
-                scores.push(prob.toFixed(6))
-              }
-              console.log(`ONNX anchor ${i} class probabilities (sigmoid):`, scores.join(', '))
-              
-              // Also try direct access to understand the structure
-              if (featuresAlongFirstDim && i === 0) {
-                console.log('Direct access preds2d[4][0]:', preds2d[4]?.[0])
-                console.log('Direct access preds2d[0][4]:', preds2d[0]?.[4])
-                console.log('Type of preds2d[4]:', typeof preds2d[4], Array.isArray(preds2d[4]))
-                console.log('preds2d[4] length:', preds2d[4]?.length)
-              }
+            if (actualAnchors > 0) {
+              const bbox = [getVal!(0, 0), getVal!(0, 1), getVal!(0, 2), getVal!(0, 3)]
+              console.log(`Sample anchor 0 bbox:`, bbox.map(v => v.toFixed(2)).join(', '))
             }
             
             // Find which anchors actually have high confidence
@@ -272,7 +257,12 @@ export default function SwitchableApp(): React.ReactNode {
               }
             }
             
-            console.log(`Highest score found: anchor ${highestAnchor}, class ${highestClass}, score=${(highestScore * 100).toFixed(2)}%`)
+            console.log(`Highest score found: anchor ${highestAnchor}, class ${highestClass} (${classNames[highestClass]}), score=${(highestScore * 100).toFixed(2)}%`)
+            
+            // Minimal class confidence logging
+            if (highestAnchor >= 0 && highestScore > 0.4) {
+              console.log(`Best detection: ${classNames[highestClass]} (${(highestScore * 100).toFixed(1)}%)`)
+            }
             
             // Debug the highest confidence anchor in detail
             if (highestAnchor >= 0) {
@@ -282,6 +272,14 @@ export default function SwitchableApp(): React.ReactNode {
                 debugFeatures.push(getVal!(highestAnchor, f).toFixed(4))
               }
               console.log(`Anchor ${highestAnchor} all features:`, debugFeatures.join(', '))
+            
+            // Simple coordinate logging
+            const f0 = getVal!(highestAnchor, 0) 
+            const f1 = getVal!(highestAnchor, 1) 
+            const f2 = getVal!(highestAnchor, 2) 
+            const f3 = getVal!(highestAnchor, 3) 
+            
+            console.log(`Best anchor coords: [${f0.toFixed(1)}, ${f1.toFixed(1)}, ${f2.toFixed(1)}, ${f3.toFixed(1)}]`)
               
               // Convert anchor index to grid position
               // YOLOv8 uses 3 scales with grids: 80x80, 40x40, 20x20 = 6400 + 1600 + 400 = 8400 anchors
@@ -388,36 +386,16 @@ export default function SwitchableApp(): React.ReactNode {
               }
             }
             
-            // Debug: Show all detections above a very low threshold
-            console.log('\nAll detections above 0.1% confidence:')
-            let debugDetectionCount = 0
-            const detectionsByClass: { [key: number]: number } = {}
-            
-            for (const det of allDetections) {
-              if (det.confidence > 0.001) {
-                detectionsByClass[det.classId] = (detectionsByClass[det.classId] || 0) + 1
-                if (debugDetectionCount < 10) {
-                  console.log(`  Anchor ${det.anchor}: ${classNames[det.classId]} (${(det.confidence * 100).toFixed(2)}%) at [${det.bbox.x.toFixed(0)}, ${det.bbox.y.toFixed(0)}, ${det.bbox.w.toFixed(0)}, ${det.bbox.h.toFixed(0)}]`)
-                  debugDetectionCount++
-                }
-              }
-            }
-            
-            // Summary of detections by class
-            console.log('\nDetection summary by class:')
-            try {
-              for (const [classId, count] of Object.entries(detectionsByClass)) {
-                console.log(`  ${classNames[parseInt(classId)]}: ${count} detections`)
-              }
-            } catch (summaryError) {
-              console.log('Error in detection summary:', summaryError)
-            }
+            // Minimal detection summary to avoid performance issues
+            const totalDetections = allDetections.length
+            console.log(`Found ${totalDetections} total detections above 0.3 confidence`)
           } catch (error) {
             console.log('ONNX parsing error:', error)
             // Don't return early - let detection logic continue
           }
           
           console.log(`ONNX: Max confidence found: ${(maxConf * 100).toFixed(2)}%`)
+          console.log(`ONNX: Best class: ${detectedClass} (${classNames[detectedClass] || 'unknown'})`)
           
           // Based on the detection patterns in logs:
           // - When pointing at container_v, model detects class 3 with 50%+ confidence
@@ -491,7 +469,11 @@ export default function SwitchableApp(): React.ReactNode {
   }, [requestPermission])
 
   const toggleMode = () => {
-    setMode(current => current === 'tflite' ? 'onnx' : 'tflite')
+    setMode(current => {
+      if (current === 'tflite') return 'onnx'
+      if (current === 'onnx') return 'native'
+      return 'tflite'
+    })
   }
 
   return (
@@ -522,41 +504,88 @@ export default function SwitchableApp(): React.ReactNode {
         const screenWidth = Dimensions.get('window').width
         const screenHeight = Dimensions.get('window').height
         
-        // Native white padding coordinate transformation 
-        // C++ does proper aspect-ratio preserving padding with top-left alignment
-        // We need to map from 640x640 model space back to screen, accounting for the padding
+        // vision-camera-resize-plugin coordinate transformation
+        // The plugin centers the image in 640x640 space with white padding
+        // We need to map from 640x640 model space back to screen space
         
         const modelSize = 640
         
-        // Calculate the same scale factor that C++ used for padding
-        // Assume typical rotated camera dimensions (will make dynamic later)
-        const rotatedHeight = 640  // Camera width becomes height after 90° rotation
-        const rotatedWidth = 480   // Camera height becomes width after 90° rotation
+        // Analyze the actual frame dimensions from logs
+        // Camera frame: 640x480 (landscape) -> vision-camera-resize-plugin converts to 640x640
+        const actualFrameWidth = 640   // From logs: "Camera frame: 640x480"
+        const actualFrameHeight = 480
         
-        const paddingScale = Math.min(modelSize / rotatedWidth, modelSize / rotatedHeight)
-        const scaledWidth = rotatedWidth * paddingScale
-        const scaledHeight = rotatedHeight * paddingScale
+        // The plugin preserves aspect ratio, so find the limiting dimension
+        const scaleX = modelSize / actualFrameWidth  // 640/640 = 1.0
+        const scaleY = modelSize / actualFrameHeight // 640/480 = 1.333
+        const paddingScale = Math.min(scaleX, scaleY) // Use 1.0 (limited by X)
         
-        console.log(`Native padding scale: ${paddingScale.toFixed(3)}, scaled to ${scaledWidth.toFixed(0)}x${scaledHeight.toFixed(0)}`)
+        const scaledWidth = actualFrameWidth * paddingScale   // 640 * 1.0 = 640
+        const scaledHeight = actualFrameHeight * paddingScale // 480 * 1.0 = 480
         
-        // Model coordinates are in 640x640 space where image occupies top-left region
-        // No correction needed - coordinates should map directly since we have proper padding
-        const compensatedX = detection.bbox.x
-        const compensatedY = detection.bbox.y  
-        const compensatedWidth = detection.bbox.w
-        const compensatedHeight = detection.bbox.h
+        // The scaled image (640x480) is centered in 640x640 model space
+        const offsetX = (modelSize - scaledWidth) / 2   // (640 - 640) / 2 = 0
+        const offsetY = (modelSize - scaledHeight) / 2  // (640 - 480) / 2 = 80
         
-        // Scale to screen dimensions
-        const scaleX = screenWidth / modelSize
-        const scaleY = screenHeight / modelSize
+        console.log(`Actual frame: ${actualFrameWidth}x${actualFrameHeight}`)
+        console.log(`Scale factors: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}, chosen=${paddingScale.toFixed(3)}`)
+        console.log(`Scaled image: ${scaledWidth.toFixed(0)}x${scaledHeight.toFixed(0)} centered in ${modelSize}x${modelSize}`)
+        console.log(`Padding offsets: X=${offsetX.toFixed(0)}, Y=${offsetY.toFixed(0)}`)
         
-        // Convert center coordinates to top-left
-        const left = (compensatedX - compensatedWidth / 2) * scaleX
-        const top = (compensatedY - compensatedHeight / 2) * scaleY
-        const width = compensatedWidth * scaleX
-        const height = compensatedHeight * scaleY
+        // Detection at (70, 3) is in 640x640 model space
+        // Image occupies Y=80 to Y=560 in this space (centered 480px image)
+        // License plate at Y=3 means it's in the padding area? That doesn't make sense.
+        // 
+        // Actually, let me reconsider: maybe the camera is rotated?
+        // If the camera is portrait (480x640), then after rotation it becomes 640x480
         
-        console.log(`Native-padded transform: model(${detection.bbox.x.toFixed(0)},${detection.bbox.y.toFixed(0)},${detection.bbox.w.toFixed(0)},${detection.bbox.h.toFixed(0)}) → screen(${left.toFixed(0)},${top.toFixed(0)},${width.toFixed(0)},${height.toFixed(0)})`)
+        // COORDINATE FORMAT DEBUGGING
+        // The license plate is in middle of screen but our bbox shows Y=3
+        // Let's investigate if we're interpreting the ONNX output format wrong
+        
+        console.log(`\\nCURRENT INTERPRETATION:`)
+        console.log(`bbox.x=${detection.bbox.x.toFixed(1)}, bbox.y=${detection.bbox.y.toFixed(1)}, bbox.w=${detection.bbox.w.toFixed(1)}, bbox.h=${detection.bbox.h.toFixed(1)}`)
+        
+        // License plate in middle of screen should be around (320, 240) in 640x480 space
+        // Or around (320, 320) in 640x640 model space
+        // But we're getting (85, 3) - that's way off!
+        
+        // HYPOTHESIS: Maybe the coordinates from the model are swapped or in different format
+        // Let's try swapping width/height with x/y
+        const altDetection = {
+          x: detection.bbox.w,  // Use width as X (146)
+          y: detection.bbox.h,  // Use height as Y (5) - still too small
+          w: detection.bbox.x,  // Use X as width (85)
+          h: detection.bbox.y   // Use Y as height (3) - way too small
+        }
+        
+        console.log(`\\nALTERNATE INTERPRETATION (swap x/y with w/h):`)
+        console.log(`alt.x=${altDetection.x.toFixed(1)}, alt.y=${altDetection.y.toFixed(1)}, alt.w=${altDetection.w.toFixed(1)}, alt.h=${altDetection.h.toFixed(1)}`)
+        
+        // Maybe the model outputs normalized coordinates (0-1) that need scaling?
+        const normalized = {
+          x: detection.bbox.x / modelSize * modelSize,  // Already in correct range
+          y: detection.bbox.y / modelSize * modelSize,  // Already in correct range  
+          w: detection.bbox.w / modelSize * modelSize,
+          h: detection.bbox.h / modelSize * modelSize
+        }
+        
+        console.log(`\\nNORMALIZED TEST (x/640*640):`)
+        console.log(`norm.x=${normalized.x.toFixed(1)}, norm.y=${normalized.y.toFixed(1)}, norm.w=${normalized.w.toFixed(1)}, norm.h=${normalized.h.toFixed(1)}`)
+        
+        // For now, use original interpretation but add debug info
+        const directScaleX = screenWidth / modelSize  
+        const directScaleY = screenHeight / modelSize 
+        
+        // BACK TO BASICS - use original coordinates to debug step by step
+        console.log(`Detection: ${detection.className} at (${detection.bbox.x.toFixed(0)}, ${detection.bbox.y.toFixed(0)}) size ${detection.bbox.w.toFixed(0)}x${detection.bbox.h.toFixed(0)}`)
+        
+        const left = (detection.bbox.x - detection.bbox.w / 2) * directScaleX
+        const top = (detection.bbox.y - detection.bbox.h / 2) * directScaleY
+        const width = detection.bbox.w * directScaleX
+        const height = detection.bbox.h * directScaleY
+        
+        console.log(`Screen: (${left.toFixed(0)}, ${top.toFixed(0)}) size ${width.toFixed(0)}x${height.toFixed(0)})`)
         
         return (
           <View
@@ -572,13 +601,40 @@ export default function SwitchableApp(): React.ReactNode {
             ]}
           >
             <View style={styles.labelContainer}>
-              <Text style={styles.labelText}>
+              <Text 
+                style={styles.labelText}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
                 {detection.className.replace('code_', '')} ({(detection.confidence * 100).toFixed(1)}%)
               </Text>
             </View>
           </View>
         )
       })}
+
+      {/* Viewfinder Overlay */}
+      <View style={styles.viewfinderOverlay}>
+        {/* Top overlay */}
+        <View style={[styles.overlaySection, { height: '5%' }]} />
+        
+        {/* Middle section with side dimming */}
+        <View style={[styles.middleSection, { height: '80%' }]}>
+          {/* Left side dim */}
+          <View style={[styles.overlaySection, { width: '5%', height: '100%' }]} />
+          
+          {/* Clear viewfinder area */}
+          <View style={styles.viewfinderContainer}>
+            <View style={styles.viewfinderFrame} />
+          </View>
+          
+          {/* Right side dim */}
+          <View style={[styles.overlaySection, { width: '5%', height: '100%' }]} />
+        </View>
+        
+        {/* Bottom overlay */}
+        <View style={[styles.overlaySection, { height: '20%' }]} />
+      </View>
 
       {/* Mode Switcher Button */}
       <TouchableOpacity 
@@ -681,19 +737,48 @@ const styles = StyleSheet.create({
   labelContainer: {
     position: 'absolute',
     top: -25,
+    left: 0,
     backgroundColor: '#00FF00',
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
-    minWidth: 60,  // Ensure minimum width
     alignItems: 'center',
+    minWidth: 200,  // Much wider for full class names
+    maxWidth: 500,  // Allow very wide labels
   },
   labelText: {
     color: 'black',
     fontSize: 12,
     fontWeight: 'bold',
     textAlign: 'center',
-    numberOfLines: 1,  // Force single line
-    ellipsizeMode: 'tail',  // Truncate with ... if too long
+  },
+  viewfinderOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'column',
+    pointerEvents: 'none',
+  },
+  overlaySection: {
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  middleSection: {
+    flexDirection: 'row',
+    width: '100%',
+  },
+  viewfinderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewfinderFrame: {
+    width: '100%',
+    height: '100%',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: 8,
+    backgroundColor: 'transparent',
   },
 })

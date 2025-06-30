@@ -45,6 +45,9 @@ add_library(
   ../cpp/TensorHelpers.cpp
   ../cpp/OnnxPlugin.cpp
   ../cpp/OnnxHelpers.cpp
+  ../cpp/preprocessing/FrameConverter.cpp
+  ../cpp/preprocessing/ImageRotation.cpp
+  ../cpp/preprocessing/WhitePadding.cpp
   src/main/cpp/Tflite.cpp
   src/main/cpp/Onnx.cpp
 )

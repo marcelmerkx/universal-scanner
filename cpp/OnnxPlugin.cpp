@@ -10,6 +10,9 @@
 #include "OnnxHelpers.h"
 #include "jsi/Promise.h"
 #include "jsi/TypedArray.h"
+#include "preprocessing/FrameConverter.h"
+#include "preprocessing/ImageRotation.h"
+#include "preprocessing/WhitePadding.h"
 #include <chrono>
 #include <future>
 #include <iostream>
@@ -118,75 +121,61 @@ struct OnnxSession {
     }
   }
   
-  // Run ONNX inference with native white padding (translated from Kotlin)
+  // Run real ONNX inference
   std::vector<float> runInference(const std::vector<uint8_t>& inputData) {
     try {
+      // Input is HWC format from resize plugin, need to convert to CHW for ONNX
+      const size_t height = 640;
+      const size_t width = 640;
       const size_t channels = 3;
-      const size_t targetSize = 640; // Model expects 640x640
       
-      // Detect input dimensions from data size (rotated frame)
-      const size_t totalPixels = inputData.size() / channels;
+      // Convert uint8 HWC to float CHW and normalize to [0,1]
+      std::vector<float> floatInput(inputData.size());
       
-      // Common rotated dimensions: 640x480, 960x720, 1440x1080, etc.
-      size_t inputHeight = 0, inputWidth = 0;
-      
-      // Determine dimensions (same logic as before but cleaner)
-      if (totalPixels == 640 * 480) {
-        inputHeight = 640; inputWidth = 480;
-      } else if (totalPixels == 960 * 720) {
-        inputHeight = 960; inputWidth = 720;
-      } else if (totalPixels == 1440 * 1080) {
-        inputHeight = 1440; inputWidth = 1080;
-      } else {
-        // Fallback: assume 4:3 ratio after rotation
-        inputHeight = static_cast<size_t>(std::sqrt(totalPixels * 4.0 / 3.0));
-        inputWidth = totalPixels / inputHeight;
+      // Debug: Check input data range before normalization
+      uint8_t minVal = 255, maxVal = 0;
+      uint32_t sum = 0;
+      const size_t sampleSize = std::min(size_t(1000), inputData.size());
+      for (size_t i = 0; i < sampleSize; i++) {
+        uint8_t val = inputData[i];
+        minVal = std::min(minVal, val);
+        maxVal = std::max(maxVal, val);
+        sum += val;
       }
+      float avgVal = static_cast<float>(sum) / sampleSize;
+      logf("C++ Input BEFORE norm (first %zu): min=%d, max=%d, avg=%.1f", sampleSize, minVal, maxVal, avgVal);
       
-      logf("Native padding: input %zux%zu (%zu pixels)", inputWidth, inputHeight, totalPixels);
-      
-      // Calculate aspect-ratio preserving scale (same as Kotlin)
-      float scale = std::min(static_cast<float>(targetSize) / inputWidth,
-                            static_cast<float>(targetSize) / inputHeight);
-      size_t scaledWidth = static_cast<size_t>(inputWidth * scale);
-      size_t scaledHeight = static_cast<size_t>(inputHeight * scale);
-      
-      logf("Scale factor: %.3f, scaled to %zux%zu", scale, scaledWidth, scaledHeight);
-      logf("Padding: right=%zu, bottom=%zu", targetSize - scaledWidth, targetSize - scaledHeight);
-      
-      // Create white-filled tensor [C, H, W] (same as Kotlin white canvas)
-      std::vector<float> floatInput(channels * targetSize * targetSize, 1.0f);
-      
-      // Copy scaled image data to top-left (same as Kotlin drawBitmap at 0,0)
+      // Transpose from HWC to CHW and normalize
+      float minNorm = 1.0f, maxNorm = 0.0f;
+      float sumNorm = 0.0f;
       for (size_t c = 0; c < channels; ++c) {
-        for (size_t y = 0; y < scaledHeight; ++y) {
-          for (size_t x = 0; x < scaledWidth; ++x) {
-            // Source pixel coordinates with bilinear-style mapping
-            size_t srcY = static_cast<size_t>(y / scale);
-            size_t srcX = static_cast<size_t>(x / scale);
+        for (size_t h = 0; h < height; ++h) {
+          for (size_t w = 0; w < width; ++w) {
+            size_t hwcIdx = (h * width + w) * channels + c;  // HWC index
+            size_t chwIdx = c * (height * width) + h * width + w;  // CHW index
+            float normalized = static_cast<float>(inputData[hwcIdx]) / 255.0f; // Normalize to [0,1]
+            floatInput[chwIdx] = normalized;
             
-            // Clamp to input bounds
-            srcY = std::min(srcY, inputHeight - 1);
-            srcX = std::min(srcX, inputWidth - 1);
-            
-            // Source: HWC format
-            size_t srcIdx = (srcY * inputWidth + srcX) * channels + c;
-            
-            // Destination: CHW format, top-left aligned
-            size_t dstIdx = c * (targetSize * targetSize) + y * targetSize + x;
-            
-            // Normalize and copy (same as Kotlin /255f)
-            floatInput[dstIdx] = static_cast<float>(inputData[srcIdx]) / 255.0f;
+            // Track normalized range for first 1000 pixels
+            if (chwIdx < sampleSize) {
+              minNorm = std::min(minNorm, normalized);
+              maxNorm = std::max(maxNorm, normalized);
+              sumNorm += normalized;
+            }
           }
         }
       }
+      float avgNorm = sumNorm / sampleSize;
+      logf("C++ Input AFTER norm (first %zu): min=%.3f, max=%.3f, avg=%.3f", sampleSize, minNorm, maxNorm, avgNorm);
+      
+      std::vector<float> tensorData = std::move(floatInput);
       
       // Create input tensor
       const char* inputNames[] = {modelInfo.inputName.c_str()};
       const char* outputNames[] = {modelInfo.outputName.c_str()};
       
       auto inputTensor = Ort::Value::CreateTensor<float>(
-        memoryInfo, floatInput.data(), floatInput.size(),
+        memoryInfo, tensorData.data(), tensorData.size(),
         modelInfo.inputShape.data(), modelInfo.inputShape.size());
       
       // Run inference
@@ -205,31 +194,50 @@ struct OnnxSession {
       
       std::vector<float> output(outputData, outputData + outputSize);
       
-      // Debug: Log first few raw output values
+      // Debug output
       logf("ONNX inference completed. Output size: %zu", outputSize);
-      logf("First 10 output values: %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f, %.4f",
-           outputSize > 0 ? output[0] : 0.0f,
-           outputSize > 1 ? output[1] : 0.0f,
-           outputSize > 2 ? output[2] : 0.0f,
-           outputSize > 3 ? output[3] : 0.0f,
-           outputSize > 4 ? output[4] : 0.0f,
-           outputSize > 5 ? output[5] : 0.0f,
-           outputSize > 6 ? output[6] : 0.0f,
-           outputSize > 7 ? output[7] : 0.0f,
-           outputSize > 8 ? output[8] : 0.0f,
-           outputSize > 9 ? output[9] : 0.0f);
       
-      // Check if we're getting reasonable bbox values (should be in pixel coordinates 0-640)
-      float firstBbox = outputSize > 0 ? output[0] : 0.0f;
-      if (firstBbox < 1.0f) {
-        logf("WARNING: First bbox value %.4f looks like normalized coordinates!", firstBbox);
-        logf("This suggests the model might expect different preprocessing!");
-      }
       return output;
       
     } catch (const Ort::Exception& e) {
       throw std::runtime_error("ONNX inference failed: " + std::string(e.what()));
     }
+  }
+  
+  // New method: Run inference on raw frame data with full preprocessing
+  std::vector<float> runInferenceWithPreprocessing(
+    const UniversalScanner::Frame& frame,
+    UniversalScanner::PaddingInfo* padInfo = nullptr
+  ) {
+    auto start = std::chrono::high_resolution_clock::now();
+    
+    // Step 1: YUV to RGB conversion
+    auto t1 = std::chrono::high_resolution_clock::now();
+    std::vector<uint8_t> rgbData = UniversalScanner::FrameConverter::convertYUVtoRGB(frame);
+    auto t2 = std::chrono::high_resolution_clock::now();
+    
+    // Step 2: Rotation if needed
+    size_t width = frame.width;
+    size_t height = frame.height;
+    
+    if (UniversalScanner::ImageRotation::needsRotation(width, height)) {
+      rgbData = UniversalScanner::ImageRotation::rotate90CW(rgbData, width, height);
+      std::swap(width, height);
+    }
+    auto t3 = std::chrono::high_resolution_clock::now();
+    
+    // Step 3: Run inference with padding
+    std::vector<float> output = runInference(rgbData);
+    auto t4 = std::chrono::high_resolution_clock::now();
+    
+    // Log performance metrics
+    logf("Preprocessing times (ms):");
+    logf("  YUV→RGB: %.2f", std::chrono::duration<double, std::milli>(t2 - t1).count());
+    logf("  Rotation: %.2f", std::chrono::duration<double, std::milli>(t3 - t2).count());
+    logf("  Inference: %.2f", std::chrono::duration<double, std::milli>(t4 - t3).count());
+    logf("  Total: %.2f", std::chrono::duration<double, std::milli>(t4 - start).count());
+    
+    return output;
   }
 };
 #else
@@ -240,7 +248,7 @@ struct OnnxSession {
   
   struct {
     std::vector<int64_t> inputShape = {1, 3, 640, 640};
-    std::vector<int64_t> outputShape = {1, 16, 8400};
+    std::vector<int64_t> outputShape = {1, 9, 8400};
     std::string inputName = "images";
     std::string outputName = "output0";
   } modelInfo;
@@ -250,7 +258,7 @@ struct OnnxSession {
   }
   
   std::vector<float> runInference(const std::vector<uint8_t>& inputData) {
-    const size_t outputSize = 16 * 8400;
+    const size_t outputSize = 9 * 8400;
     std::vector<float> output(outputSize, 0.0f);
     return output;
   }
@@ -378,23 +386,28 @@ void OnnxPlugin::copyInputBuffers(jsi::Runtime& runtime, jsi::Object inputValues
     throw jsi::JSError(runtime, "ONNX: Expected exactly 1 input tensor!");
   }
 
-  // Get the input TypedArray
+  // Get the input object (could be TypedArray or Frame)
   jsi::Object inputObject = array.getValueAtIndex(runtime, 0).asObject(runtime);
   
-  if (!isTypedArray(runtime, inputObject)) {
-    throw jsi::JSError(runtime, "ONNX: Input value is not a TypedArray!");
+  // Check if it's a Frame object (has width, height properties)
+  if (inputObject.hasProperty(runtime, "width") && inputObject.hasProperty(runtime, "height")) {
+    // Handle Frame object - do native preprocessing
+    processFrameInput(runtime, inputObject);
+  } else if (isTypedArray(runtime, inputObject)) {
+    // Handle TypedArray - legacy path
+    TypedArrayBase inputBuffer = getTypedArray(runtime, std::move(inputObject));
+    
+    // Store input data for processing
+    size_t size = inputBuffer.size(runtime);
+    _inputData.resize(size);
+    
+    // Copy data from TypedArray to vector
+    auto arrayBuffer = inputBuffer.getBuffer(runtime);
+    uint8_t* data = arrayBuffer.data(runtime);
+    std::memcpy(_inputData.data(), data, size);
+  } else {
+    throw jsi::JSError(runtime, "ONNX: Input value must be a TypedArray or Frame object!");
   }
-
-  TypedArrayBase inputBuffer = getTypedArray(runtime, std::move(inputObject));
-  
-  // Store input data for processing
-  size_t size = inputBuffer.size(runtime);
-  _inputData.resize(size);
-  
-  // Copy data from TypedArray to vector
-  auto arrayBuffer = inputBuffer.getBuffer(runtime);
-  uint8_t* data = arrayBuffer.data(runtime);
-  std::memcpy(_inputData.data(), data, size);
 }
 
 jsi::Value OnnxPlugin::copyOutputBuffers(jsi::Runtime& runtime) {
@@ -449,13 +462,24 @@ jsi::Value OnnxPlugin::copyOutputBuffers(jsi::Runtime& runtime) {
   return result;
 }
 
+void OnnxPlugin::processFrameInput(jsi::Runtime& runtime, jsi::Object& frameObject) {
+  // CRITICAL: JSI Frame objects cannot access native buffers directly
+  // We need native frame buffer access which requires a different approach
+  
+  throw jsi::JSError(runtime, 
+    "ONNX Native preprocessing requires native frame buffer access. "
+    "Use vision-camera-resize-plugin or implement a native frame processor plugin "
+    "that can access Android Image/iOS CVPixelBuffer directly from the camera."
+  );
+}
+
 void OnnxPlugin::run() {
   auto* session = static_cast<OnnxSession*>(_session);
   if (session == nullptr) {
     throw std::runtime_error("ONNX session is null!");
   }
   
-  // Run mock inference
+  // Run inference with preprocessed data
   std::vector<float> output = session->runInference(_inputData);
   
   // Store output for later retrieval

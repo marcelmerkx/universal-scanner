@@ -212,8 +212,15 @@ static facebook::jsi::Value universalScanner(
 - Use memory pools for frequent allocations
 - Proper cleanup of GPU resources
 
+## ONNX Runtime Experiences
+
+- The ONNX weights "unified-detection-v7.onnx" are working fine. but the ONNX runtime output is complex. when we get a misreading, it is most likely we either have bad input or we're not processing the ONNX results well.
+
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
 ALWAYS prefer editing an existing file to creating a new one.
 NEVER proactively create documentation files (*.md) or README files. Only create documentation files if explicitly requested by the User.
+
+## Coding Guidelines
+- Never create mock data (be it image or pre/post processing) in our image processing pipeline.

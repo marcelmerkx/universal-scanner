@@ -57,6 +57,7 @@ private:
   void copyInputBuffers(jsi::Runtime& runtime, jsi::Object inputValues);
   jsi::Value copyOutputBuffers(jsi::Runtime& runtime);
   void run();
+  void processFrameInput(jsi::Runtime& runtime, jsi::Object& frameObject);
   std::shared_ptr<TypedArrayBase> getOutputArrayForSession(jsi::Runtime& runtime, size_t index);
 };
 
