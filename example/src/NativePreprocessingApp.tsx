@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { StyleSheet, View, Text, ActivityIndicator } from 'react-native'
+import { StyleSheet, View, Text, ActivityIndicator, ScrollView } from 'react-native'
 import {
   Camera,
   useCameraDevice,
@@ -8,7 +8,8 @@ import {
   Frame,
   VisionCameraProxy,
 } from 'react-native-vision-camera'
-import { ScannerResult } from 'react-native-fast-tflite'
+import { ScannerResult, useOnnxModel } from 'react-native-fast-tflite'
+import { useResizePlugin } from 'vision-camera-resize-plugin'
 import { Worklets } from 'react-native-worklets-core'
 
 export default function NativePreprocessingApp(): React.ReactNode {
@@ -17,12 +18,27 @@ export default function NativePreprocessingApp(): React.ReactNode {
   const [lastResult, setLastResult] = React.useState<any>(null)
   const [fps, setFps] = React.useState(0)
   
-  // Initialize VisionCamera plugin
+  // Load ONNX model for JavaScript processing (switching from native to test)
+  const onnxModel = useOnnxModel(require('../assets/unified-detection-v7.onnx'), 'cpu')
+  const { resize } = useResizePlugin()
+  
+  // Initialize VisionCamera plugin (keep for comparison)
   const universalScanner = VisionCameraProxy.initFrameProcessorPlugin('universalScanner')
   
   React.useEffect(() => {
     console.log('universalScanner plugin initialized:', typeof universalScanner, universalScanner)
   }, [universalScanner])
+  
+  React.useEffect(() => {
+    console.log('ONNX model state:', onnxModel.state)
+    console.log('ONNX model object:', onnxModel.model)
+    if (onnxModel.state === 'loaded') {
+      console.log('ONNX model loaded successfully for JavaScript processing!')
+      console.log('Model methods:', onnxModel.model ? Object.keys(onnxModel.model) : 'model is null')
+    } else if (onnxModel.state === 'error') {
+      console.error('ONNX model loading failed:', onnxModel.error)
+    }
+  }, [onnxModel.state, onnxModel.model])
   
   // Track FPS
   const frameCount = React.useRef(0)
@@ -52,21 +68,17 @@ export default function NativePreprocessingApp(): React.ReactNode {
       // Update FPS counter
       updateFps()
       
+      // BACK TO NATIVE C++ MODE FOR TENSOR DUMP
       try {
-        console.log('About to call universalScanner, type:', typeof universalScanner)
-        
         if (!universalScanner || typeof universalScanner.call !== 'function') {
-          console.log('universalScanner.call is not available:', universalScanner)
           return
         }
         
         // Run the universal scanner with native preprocessing using VisionCamera plugin
         const result = universalScanner.call(frame, {
-          enabledTypes: ['code_qr_barcode', 'code_container_h', 'code_container_v'],
+          enabledTypes: ['code_qr_barcode', 'code_container_h', 'code_container_v', 'code_license_plate'],
           verbose: true,
         })
-        
-        console.log('VisionCamera universalScanner result:', result)
         
         if (result) {
           onScanResult(result)
@@ -90,22 +102,17 @@ export default function NativePreprocessingApp(): React.ReactNode {
     
     return (
       <View style={styles.resultContainer}>
-        <Text style={styles.resultTitle}>VisionCamera Plugin Result:</Text>
-        <Text style={styles.detectionValue}>
-          Status: {lastResult.status || lastResult.error || 'Unknown'}
-        </Text>
-        <Text style={styles.detectionValue}>
-          Message: {lastResult.message || lastResult.error || 'No message'}
-        </Text>
-        {lastResult.results && lastResult.results.map((result: any, index: number) => (
-          <View key={index} style={styles.detection}>
-            <Text style={styles.detectionType}>{result.type}</Text>
-            <Text style={styles.detectionValue}>{result.value}</Text>
-            <Text style={styles.detectionConfidence}>
-              Confidence: {(result.confidence * 100).toFixed(1)}%
-            </Text>
-          </View>
-        ))}
+        <Text style={styles.resultTitle}>Detections: {lastResult.detections?.length || 0}</Text>
+        <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+          {lastResult.detections && lastResult.detections.map((detection: any, index: number) => (
+            <View key={index} style={styles.detection}>
+              <Text style={styles.detectionType}>{detection.type.replace('code_', '')}</Text>
+              <Text style={styles.detectionValue}>
+                {(parseFloat(detection.confidence) * 100).toFixed(0)}% • {parseInt(detection.width)}×{parseInt(detection.height)}
+              </Text>
+            </View>
+          ))}
+        </ScrollView>
       </View>
     )
   }
@@ -124,11 +131,34 @@ export default function NativePreprocessingApp(): React.ReactNode {
           />
           <View style={styles.overlay}>
             <Text style={styles.fps}>FPS: {fps}</Text>
-            <Text style={styles.title}>Native Preprocessing Demo</Text>
+            <Text style={styles.title}>Native C++ Tensor Dump Mode</Text>
             <Text style={styles.subtitle}>
-              All preprocessing (YUV→RGB, rotation, padding) in C++
+              Creating comprehensive ONNX tensor dump to find 70% confidence
             </Text>
             {renderResult()}
+          </View>
+          
+          {/* Viewfinder Overlay */}
+          <View style={styles.viewfinderOverlay}>
+            {/* Top overlay */}
+            <View style={[styles.overlaySection, { height: '5%' }]} />
+            
+            {/* Middle section with side dimming */}
+            <View style={[styles.middleSection, { height: '80%' }]}>
+              {/* Left side dim */}
+              <View style={[styles.overlaySection, { width: '5%', height: '100%' }]} />
+              
+              {/* Clear viewfinder area */}
+              <View style={styles.viewfinderContainer}>
+                <View style={styles.viewfinderFrame} />
+              </View>
+              
+              {/* Right side dim */}
+              <View style={[styles.overlaySection, { width: '5%', height: '100%' }]} />
+            </View>
+            
+            {/* Bottom overlay */}
+            <View style={[styles.overlaySection, { height: '20%' }]} />
           </View>
         </>
       ) : (
@@ -190,34 +220,38 @@ const styles = StyleSheet.create({
   },
   resultContainer: {
     position: 'absolute',
-    bottom: 50,
-    left: 20,
-    right: 20,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    padding: 15,
-    borderRadius: 10,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    padding: 10,
+    paddingBottom: 20,
+    maxHeight: 120,
+  },
+  scrollView: {
+    flex: 1,
   },
   resultTitle: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: 'bold',
     color: 'white',
-    marginBottom: 10,
+    marginBottom: 5,
   },
   detection: {
-    marginBottom: 10,
-    paddingBottom: 10,
+    marginBottom: 5,
+    paddingBottom: 5,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.2)',
   },
   detectionType: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#4CAF50',
     fontWeight: 'bold',
   },
   detectionValue: {
-    fontSize: 16,
+    fontSize: 12,
     color: 'white',
-    marginTop: 2,
+    marginTop: 1,
   },
   detectionConfidence: {
     fontSize: 12,
@@ -228,5 +262,34 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
     marginTop: 5,
+  },
+  viewfinderOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'column',
+    pointerEvents: 'none',
+  },
+  overlaySection: {
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+  },
+  middleSection: {
+    flexDirection: 'row',
+    width: '100%',
+  },
+  viewfinderContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  viewfinderFrame: {
+    width: '100%',
+    height: '100%',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: 8,
+    backgroundColor: 'transparent',
   },
 })
