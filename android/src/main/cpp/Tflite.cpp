@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "TensorflowPlugin.h"
+#include "UniversalScannerPlugin.h"
 #include <ReactCommon/CallInvoker.h>
 #include <ReactCommon/CallInvokerHolder.h>
 
@@ -56,6 +57,7 @@ public:
 
     try {
       TensorflowPlugin::installToRuntime(*runtime, jsCallInvoker, fetchByteDataFromUrl);
+      UniversalScannerPlugin::install(*runtime, jsCallInvoker);
     } catch (std::exception& exc) {
       return false;
     }

@@ -126,6 +126,9 @@ dependencies {
   //noinspection GradleDynamicVersion
   implementation "com.facebook.react:react-native:+"
 
+  // VisionCamera Frame Processors - needed for compilation of frame processor plugin classes
+  implementation project(':react-native-vision-camera')
+
   // Tensorflow Lite .aar (includes C API via prefabs)
   implementation "com.google.ai.edge.litert:litert:1.0.1"
   extractSO("com.google.ai.edge.litert:litert:1.0.1")

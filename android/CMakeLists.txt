@@ -45,6 +45,7 @@ add_library(
   ../cpp/TensorHelpers.cpp
   ../cpp/OnnxPlugin.cpp
   ../cpp/OnnxHelpers.cpp
+  ../cpp/UniversalScannerPlugin.cpp
   ../cpp/preprocessing/FrameConverter.cpp
   ../cpp/preprocessing/ImageRotation.cpp
   ../cpp/preprocessing/WhitePadding.cpp
@@ -90,4 +91,28 @@ else()
   )
 endif()
 
-# ONNX is now included in the main library above
+# Universal Scanner native module
+add_library(
+  universal
+  SHARED
+  src/main/cpp/Universal.cpp
+  ../cpp/preprocessing/FrameConverter.cpp
+  ../cpp/preprocessing/ImageRotation.cpp
+  ../cpp/preprocessing/WhitePadding.cpp
+)
+
+target_include_directories(
+  universal
+  PRIVATE
+  "../cpp"
+  "src/main/cpp"
+  "src/main/cpp/lib/onnxruntime/headers"
+)
+
+target_link_libraries(
+  universal
+  android
+  log
+  fbjni::fbjni
+  ${ONNXRUNTIME}
+)

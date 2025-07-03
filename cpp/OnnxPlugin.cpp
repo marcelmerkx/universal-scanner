@@ -571,3 +571,4 @@ std::vector<jsi::PropNameID> OnnxPlugin::getPropertyNames(jsi::Runtime& runtime)
   result.push_back(jsi::PropNameID::forAscii(runtime, "provider"));
   return result;
 }
+

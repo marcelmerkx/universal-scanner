@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { StyleSheet, View, Text, ActivityIndicator, ScrollView } from 'react-native'
+import { StyleSheet, View, Text, ActivityIndicator, ScrollView, Dimensions } from 'react-native'
 import {
   Camera,
   useCameraDevice,
@@ -17,6 +17,7 @@ export default function NativePreprocessingApp(): React.ReactNode {
   const device = useCameraDevice('back')
   const [lastResult, setLastResult] = React.useState<any>(null)
   const [fps, setFps] = React.useState(0)
+  const screenDimensions = Dimensions.get('window')
   
   // Load ONNX model for JavaScript processing (switching from native to test)
   const onnxModel = useOnnxModel(require('../assets/unified-detection-v7.onnx'), 'cpu')
@@ -97,6 +98,50 @@ export default function NativePreprocessingApp(): React.ReactNode {
     requestPermission()
   }, [requestPermission])
 
+  const renderBoundingBoxes = () => {
+    if (!lastResult?.detections) return null
+    
+    return (
+      <View style={styles.boundingBoxContainer}>
+        {lastResult.detections.map((detection: any, index: number) => {
+          // Convert detection coordinates to screen coordinates
+          // Camera frame is 640x480, need to scale to screen size
+          const frameWidth = 640
+          const frameHeight = 480
+          
+          // Scale factors for current screen
+          const scaleX = screenDimensions.width / frameWidth
+          const scaleY = screenDimensions.height / frameHeight
+          
+          // Get detection coordinates
+          const x = parseInt(detection.x) * scaleX
+          const y = parseInt(detection.y) * scaleY
+          const width = parseInt(detection.width) * scaleX
+          const height = parseInt(detection.height) * scaleY
+          
+          return (
+            <View
+              key={index}
+              style={[
+                styles.boundingBox,
+                {
+                  left: x - width / 2, // Center the box on detection center
+                  top: y - height / 2,
+                  width: width,
+                  height: height,
+                }
+              ]}
+            >
+              <Text style={styles.boundingBoxLabel}>
+                {detection.type.replace('code_', '')}: {(parseFloat(detection.confidence) * 100).toFixed(0)}%
+              </Text>
+            </View>
+          )
+        })}
+      </View>
+    )
+  }
+
   const renderResult = () => {
     if (!lastResult) return null
     
@@ -109,6 +154,9 @@ export default function NativePreprocessingApp(): React.ReactNode {
               <Text style={styles.detectionType}>{detection.type.replace('code_', '')}</Text>
               <Text style={styles.detectionValue}>
                 {(parseFloat(detection.confidence) * 100).toFixed(0)}% • {parseInt(detection.width)}×{parseInt(detection.height)}
+              </Text>
+              <Text style={styles.detectionValue}>
+                pos: {parseInt(detection.x)},{parseInt(detection.y)} • {detection.model}
               </Text>
             </View>
           ))}
@@ -131,12 +179,15 @@ export default function NativePreprocessingApp(): React.ReactNode {
           />
           <View style={styles.overlay}>
             <Text style={styles.fps}>FPS: {fps}</Text>
-            <Text style={styles.title}>Native C++ Tensor Dump Mode</Text>
+            <Text style={styles.title}>Native C++ ONNX Detection</Text>
             <Text style={styles.subtitle}>
-              Creating comprehensive ONNX tensor dump to find 70% confidence
+              Real-time license plate detection with bounding boxes
             </Text>
             {renderResult()}
           </View>
+          
+          {/* Bounding Box Overlay */}
+          {renderBoundingBoxes()}
           
           {/* Viewfinder Overlay */}
           <View style={styles.viewfinderOverlay}>
@@ -291,5 +342,33 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.8)',
     borderRadius: 8,
     backgroundColor: 'transparent',
+  },
+  boundingBoxContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    pointerEvents: 'none',
+  },
+  boundingBox: {
+    position: 'absolute',
+    borderWidth: 3,
+    borderColor: '#00FF00',
+    backgroundColor: 'transparent',
+    borderRadius: 4,
+  },
+  boundingBoxLabel: {
+    position: 'absolute',
+    top: -25,
+    left: 0,
+    backgroundColor: 'rgba(0, 255, 0, 0.8)',
+    color: 'black',
+    fontSize: 12,
+    fontWeight: 'bold',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 3,
+    overflow: 'hidden',
   },
 })

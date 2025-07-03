@@ -34,7 +34,6 @@ struct ScanResult {
     std::string imageCropPath;
     std::string fullFramePath;
     std::string model;
-    std::map<std::string, jsi::Value> verbose;
 };
 
 class UniversalScannerPlugin {
