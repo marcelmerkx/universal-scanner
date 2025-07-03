@@ -49,7 +49,7 @@ const confidence = getVal(i, 4);
 
 ## Model Output Shape Analysis
 
-For our YOLOv7 container detection model:
+For our YOLO8n v7 container detection model:
 - **Expected Shape**: `[1, 9, 8400]` or `[1, 8400, 9]`
 - **Attributes**: 9 (4 bbox + 5 classes)
 - **Anchors**: 8400 detection points

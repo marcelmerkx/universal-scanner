@@ -1,6 +1,6 @@
 # ONNX C++ Implementation Guide for Universal Scanner
 
-**Date**: 2025-01-03  
+**Date**: 2026-07-03  
 **Critical**: This document captures hard-won knowledge about ONNX output format in C++ implementation
 
 ## 🚨 Key Discovery: ONNX Output Format in C++
@@ -13,19 +13,21 @@ After hours of debugging, we discovered that the ONNX model output has a specifi
 - **Input Shape**: `[1, 3, 640, 640]` (NCHW format)
 - **Output Shape**: `[1, 9, 8400]`
   - Batch size: 1
-  - Features: 9 (4 bbox + 1 objectness + 4 classes)
+  - Features: 9 (4 bbox + 5 classes, **NO objectness**)
   - Anchors: 8400 detection points
 
 ### Feature Layout (9 features per anchor)
 ```
 Index 0-3: Bounding box (x_center, y_center, width, height)
-Index 4:   Objectness score (raw logit, needs sigmoid)
-Index 5-8: Class scores for 4 classes (raw logits, need sigmoid)
-           - Class 0: code_qr_barcode
-           - Class 1: license_plate
-           - Class 2: code_container_h
-           - Class 3: code_container_v
+Index 4-8: Class scores for 5 classes (raw logits, need sigmoid)
+           - Class 0: code_container_h
+           - Class 1: code_container_v
+           - Class 2: code_license_plate
+           - Class 3: code_qr_barcode
+           - Class 4: code_seal
 ```
+
+**CRITICAL**: This YOLO variant has **NO objectness score** - only direct class predictions!
 
 ## Critical Implementation Details
 
@@ -60,29 +62,22 @@ auto getVal = [&](size_t anchorIdx, size_t featureIdx) -> float {
 
 ### 2. Sigmoid Activation Required
 
-**CRITICAL**: All objectness and class scores are raw logits that MUST have sigmoid applied:
+**CRITICAL**: All class scores are raw logits that MUST have sigmoid applied:
 
 ```cpp
 auto sigmoid = [](float x) {
     return 1.0f / (1.0f + std::exp(-x));
 };
 
-float objectness = sigmoid(getVal(anchor, 4));
-float classScore = sigmoid(getVal(anchor, 5 + classIdx));
+float classScore = sigmoid(getVal(anchor, 4 + classIdx));
 ```
 
 ### 3. Confidence Calculation
 
-**IMPORTANT DISCOVERY**: This model outputs very low objectness scores (~0.01 raw, ~0.50 after sigmoid).
+**IMPORTANT**: This model has **NO objectness score** - confidence comes directly from class probabilities:
 
-Traditional YOLO confidence calculation:
 ```cpp
-float confidence = objectness * classScore;  // Gives ~33% for our model
-```
-
-For this specific model, use class score only:
-```cpp
-float confidence = classScore;  // Gives ~67% (correct)
+float confidence = maxClassScore;  // Direct class probability
 ```
 
 ### 4. Complete Detection Pipeline
@@ -126,7 +121,6 @@ for (size_t a = 0; a < anchors; a++) {
 1. **❌ Don't assume flat Float32Array format** - ONNX C++ API returns a pointer to float data
 2. **❌ Don't forget sigmoid activation** - Raw logits will give wrong results
 3. **❌ Don't hardcode tensor layout** - Always use adaptive indexing
-4. **❌ Don't assume traditional YOLO confidence** - This model has low objectness scores
 
 ## Debugging Tips
 
@@ -147,7 +141,6 @@ for (size_t a = 0; a < anchors; a++) {
 
 This `unified-detection-v7.onnx` model:
 - Trained specifically for logistics/transportation objects
-- Uses non-standard objectness scoring (very low values)
 - Best results with class-probability-only confidence
 - License plates typically detected around anchors 6930-6936
 - Expected confidence for well-visible license plates: 65-70%

@@ -19,6 +19,10 @@ export default function NativePreprocessingApp(): React.ReactNode {
   const [fps, setFps] = React.useState(0)
   const screenDimensions = Dimensions.get('window')
   
+  React.useEffect(() => {
+    console.log('Screen dimensions:', screenDimensions)
+  }, [screenDimensions])
+  
   // Load ONNX model for JavaScript processing (switching from native to test)
   const onnxModel = useOnnxModel(require('../assets/unified-detection-v7.onnx'), 'cpu')
   const { resize } = useResizePlugin()
@@ -104,38 +108,61 @@ export default function NativePreprocessingApp(): React.ReactNode {
     return (
       <View style={styles.boundingBoxContainer}>
         {lastResult.detections.map((detection: any, index: number) => {
-          // Convert detection coordinates to screen coordinates
-          // Camera frame is 640x480, need to scale to screen size
-          const frameWidth = 640
-          const frameHeight = 480
+          // C++ returns pixel coordinates in 640x640 ONNX space (center point + dimensions)
+          const onnxX = parseInt(detection.x)      // Center X in 640x640 space
+          const onnxY = parseInt(detection.y)      // Center Y in 640x640 space  
+          const onnxW = parseInt(detection.width)  // Width in 640x640 space
+          const onnxH = parseInt(detection.height) // Height in 640x640 space
           
-          // Scale factors for current screen
-          const scaleX = screenDimensions.width / frameWidth
-          const scaleY = screenDimensions.height / frameHeight
+          // The ONNX coordinates are inverted on both axes
+          // Use UNIFORM scaling to maintain aspect ratio
+          // The ONNX space is 640x640 square, but screen is not square
+          const uniformScale = Math.min(screenDimensions.width / 640, screenDimensions.height / 640)
           
-          // Get detection coordinates
-          const x = parseInt(detection.x) * scaleX
-          const y = parseInt(detection.y) * scaleY
-          const width = parseInt(detection.width) * scaleX
-          const height = parseInt(detection.height) * scaleY
+          // Calculate offsets to center the 640x640 space on screen
+          const offsetX = (screenDimensions.width - 640 * uniformScale) / 2
+          const offsetY = (screenDimensions.height - 640 * uniformScale) / 2
+          
+          // Flip and scale coordinates uniformly
+          const screenX = (640 - onnxX) * uniformScale + offsetX
+          const screenY = (640 - onnxY) * uniformScale + offsetY
+          
+          // Scale dimensions uniformly
+          const screenW = onnxW * uniformScale
+          const screenH = onnxH * uniformScale
+          
+          // Convert from center coordinates to top-left for React Native positioning
+          const boxLeft = screenX - screenW / 2
+          const boxTop = screenY - screenH / 2
+          
+          console.log(`=== COORDINATE TRANSFORMATION (UNIFORM SCALING) ===`)
+          console.log(`ONNX coordinates (640x640): center=(${onnxX},${onnxY}), size=${onnxW}×${onnxH}`)
+          console.log(`Screen dimensions: ${screenDimensions.width}×${screenDimensions.height}`)
+          console.log(`Uniform scale: ${uniformScale.toFixed(3)} (maintains aspect ratio)`)
+          console.log(`Offsets: X=${offsetX.toFixed(1)}, Y=${offsetY.toFixed(1)}`)
+          console.log(`Flipped & scaled center: (${screenX.toFixed(1)},${screenY.toFixed(1)})`)
+          console.log(`Scaled size: ${screenW.toFixed(1)}×${screenH.toFixed(1)}`)
+          console.log(`Bounding box: left=${boxLeft.toFixed(1)}, top=${boxTop.toFixed(1)}`)
           
           return (
-            <View
-              key={index}
-              style={[
-                styles.boundingBox,
-                {
-                  left: x - width / 2, // Center the box on detection center
-                  top: y - height / 2,
-                  width: width,
-                  height: height,
-                }
-              ]}
-            >
-              <Text style={styles.boundingBoxLabel}>
-                {detection.type.replace('code_', '')}: {(parseFloat(detection.confidence) * 100).toFixed(0)}%
-              </Text>
-            </View>
+            <React.Fragment key={index}>
+              {/* Main bounding box (green) */}
+              <View
+                style={[
+                  styles.boundingBox,
+                  {
+                    left: Math.max(0, boxLeft),
+                    top: Math.max(0, boxTop),
+                    width: Math.max(20, screenW),
+                    height: Math.max(20, screenH),
+                  }
+                ]}
+              >
+                <Text style={styles.boundingBoxLabel}>
+                  {detection.type.replace('code_', '')}: {(parseFloat(detection.confidence) * 100).toFixed(0)}%
+                </Text>
+              </View>
+            </React.Fragment>
           )
         })}
       </View>

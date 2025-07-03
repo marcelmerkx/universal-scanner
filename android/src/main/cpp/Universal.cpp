@@ -20,6 +20,21 @@
 
 #define LOGF(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "UniversalNative", fmt, ##__VA_ARGS__)
 
+// Class name mapping for unified detection model
+const char* getClassName(int classIdx) {
+    static const char* classNames[] = {
+        "code_container_h",    // 0
+        "code_container_v",    // 1  
+        "code_license_plate",  // 2
+        "code_qr_barcode",     // 3
+        "code_seal"            // 4
+    };
+    if (classIdx >= 0 && classIdx < 5) {
+        return classNames[classIdx];
+    }
+    return "unknown";
+}
+
 using namespace facebook::jni;
 
 namespace universal {
@@ -35,7 +50,7 @@ private:
     // Model info for unified-detection-v7.onnx
     struct {
         std::vector<int64_t> inputShape = {1, 3, 640, 640}; // NCHW format
-        std::vector<int64_t> outputShape = {1, 9, 8400}; // 9 features x 8400 anchors
+        std::vector<int64_t> outputShape = {1, 9, 8400}; // 9 features x 8400 anchors (4 bbox + 5 classes, NO objectness)
         std::string inputName = "images";
         std::string outputName = "output0";
     } modelInfo;
@@ -339,56 +354,56 @@ public:
             }
             
             // Dump entire ONNX output to file for analysis
-            std::string outputFile = "/storage/emulated/0/Download/onnx_output.txt";
-            FILE* file = fopen(outputFile.c_str(), "w");
-            if (file) {
-                fprintf(file, "ONNX Output Analysis\n");
-                fprintf(file, "Output shape: [%ld, %ld, %ld]\n", 
-                       (long)outputShape[0], (long)outputShape[1], (long)outputShape[2]);
-                fprintf(file, "Total elements: %ld\n", 
-                       (long)(outputShape[0] * outputShape[1] * outputShape[2]));
+            // std::string outputFile = "/storage/emulated/0/Download/onnx_output.txt";
+            // FILE* file = fopen(outputFile.c_str(), "w");
+            // if (file) {
+            //     fprintf(file, "ONNX Output Analysis\n");
+            //     fprintf(file, "Output shape: [%ld, %ld, %ld]\n", 
+            //            (long)outputShape[0], (long)outputShape[1], (long)outputShape[2]);
+            //     fprintf(file, "Total elements: %ld\n", 
+            //            (long)(outputShape[0] * outputShape[1] * outputShape[2]));
                 
-                // Analyze value distribution
-                fprintf(file, "\n--- VALUE DISTRIBUTION ANALYSIS ---\n");
-                int zeroCount = 0, nearZeroCount = 0, smallCount = 0, largeCount = 0;
-                float minVal = 1e9, maxVal = -1e9;
-                for (size_t i = 0; i < output.size(); i++) {
-                    float val = output[i];
-                    if (val == 0.0f) zeroCount++;
-                    else if (std::abs(val) < 0.01f) nearZeroCount++;
-                    else if (std::abs(val) < 1.0f) smallCount++;
-                    else largeCount++;
-                    minVal = std::min(minVal, val);
-                    maxVal = std::max(maxVal, val);
-                }
-                fprintf(file, "Zeros: %d, Near-zeros: %d, Small: %d, Large: %d\n", 
-                        zeroCount, nearZeroCount, smallCount, largeCount);
-                fprintf(file, "Min: %.6f, Max: %.6f\n", minVal, maxVal);
+            //     // Analyze value distribution
+            //     fprintf(file, "\n--- VALUE DISTRIBUTION ANALYSIS ---\n");
+            //     int zeroCount = 0, nearZeroCount = 0, smallCount = 0, largeCount = 0;
+            //     float minVal = 1e9, maxVal = -1e9;
+            //     for (size_t i = 0; i < output.size(); i++) {
+            //         float val = output[i];
+            //         if (val == 0.0f) zeroCount++;
+            //         else if (std::abs(val) < 0.01f) nearZeroCount++;
+            //         else if (std::abs(val) < 1.0f) smallCount++;
+            //         else largeCount++;
+            //         minVal = std::min(minVal, val);
+            //         maxVal = std::max(maxVal, val);
+            //     }
+            //     fprintf(file, "Zeros: %d, Near-zeros: %d, Small: %d, Large: %d\n", 
+            //             zeroCount, nearZeroCount, smallCount, largeCount);
+            //     fprintf(file, "Min: %.6f, Max: %.6f\n", minVal, maxVal);
                 
-                fprintf(file, "\n--- STRUCTURED BY ANCHOR (first 100 anchors) ---\n");
-                fprintf(file, "Format: %s\n", isFeaturesMajor ? "[1, 9, 8400]" : "[1, 8400, 9]");
-                for (size_t anchor = 0; anchor < std::min(size_t(100), anchors); anchor++) {
-                    fprintf(file, "Anchor %zu: ", anchor);
-                    for (size_t feat = 0; feat < features; feat++) {
-                        float rawVal = getVal(anchor, feat);
-                        fprintf(file, "%.3f ", rawVal);
-                    }
-                    // Try different confidence calculations
-                    float obj = sigmoid(getVal(anchor, 4));
-                    float cls0 = sigmoid(getVal(anchor, 5));
-                    float cls1 = sigmoid(getVal(anchor, 6));
-                    float conf1 = obj * cls0;
-                    float conf2 = obj * cls1;
-                    float maxConf = std::max(conf1, conf2);
-                    fprintf(file, " -> obj=%.3f, cls0=%.3f, cls1=%.3f, maxConf=%.3f\n", 
-                            obj, cls0, cls1, maxConf);
-                }
+            //     fprintf(file, "\n--- STRUCTURED BY ANCHOR (first 100 anchors) ---\n");
+            //     fprintf(file, "Format: %s\n", isFeaturesMajor ? "[1, 9, 8400]" : "[1, 8400, 9]");
+            //     for (size_t anchor = 0; anchor < std::min(size_t(100), anchors); anchor++) {
+            //         fprintf(file, "Anchor %zu: ", anchor);
+            //         for (size_t feat = 0; feat < features; feat++) {
+            //             float rawVal = getVal(anchor, feat);
+            //             fprintf(file, "%.3f ", rawVal);
+            //         }
+            //         // Try different confidence calculations
+            //         float obj = sigmoid(getVal(anchor, 4));
+            //         float cls0 = sigmoid(getVal(anchor, 5));
+            //         float cls1 = sigmoid(getVal(anchor, 6));
+            //         float conf1 = obj * cls0;
+            //         float conf2 = obj * cls1;
+            //         float maxConf = std::max(conf1, conf2);
+            //         fprintf(file, " -> obj=%.3f, cls0=%.3f, cls1=%.3f, maxConf=%.3f\n", 
+            //                 obj, cls0, cls1, maxConf);
+            //     }
                 
-                fclose(file);
-                LOGF("ONNX output dumped to: %s", outputFile.c_str());
-            } else {
-                LOGF("Failed to create output file: %s", outputFile.c_str());
-            }
+            //     fclose(file);
+            //     LOGF("ONNX output dumped to: %s", outputFile.c_str());
+            // } else {
+            //     LOGF("Failed to create output file: %s", outputFile.c_str());
+            // }
             
             LOGF("About to start detection search using OnnxPlugin.cpp approach...");
             
@@ -407,16 +422,12 @@ public:
                 float width    = getVal(a, 2);
                 float height   = getVal(a, 3);
                 
-                // Get objectness score (feature 4) - this is a raw logit, needs sigmoid
-                float objectness_raw = getVal(a, 4);
-                float objectness = sigmoid(objectness_raw);
-                
-                // Get class probabilities (features 5-8 for 4 classes, NOT 5!)
-                // Model has 9 features total: 4 bbox + 1 objectness + 4 classes
+                // This model has NO objectness score! Just 5 class scores directly
+                // Features 4-8: 5 class probabilities 
                 float maxClassProb = 0.0f;
                 int classIdx = -1;
-                for (int c = 0; c < 4; c++) {
-                    float classProb_raw = getVal(a, 5 + c);
+                for (int c = 0; c < 5; c++) {  // 5 classes: features 4-8
+                    float classProb_raw = getVal(a, 4 + c);
                     float classProb = sigmoid(classProb_raw);
                     if (classProb > maxClassProb) {
                         maxClassProb = classProb;
@@ -424,24 +435,18 @@ public:
                     }
                 }
                 
-                // Try different confidence calculations
-                // Some YOLO variants use just class probability without objectness
-                float confMethod1 = objectness * maxClassProb;  // Traditional YOLO
-                float confMethod2 = maxClassProb;               // Just class probability
-                float confMethod3 = std::max(objectness, maxClassProb); // Max of both
-                
-                // Use the method that gives reasonable confidence scores
-                float confidence = confMethod2;  // Try just class probability
+                // No objectness - just use class probability directly
+                float confidence = maxClassProb;
                 
                 // Debug high-confidence detections
                 if (confidence > 0.5f && a >= 6900 && a <= 7000) {
-                    LOGF("HIGH CONF anchor %zu: obj=%.3f, maxClass=%.3f, method1=%.3f, method2=%.3f, bbox=[%.1f,%.1f,%.1f,%.1f]",
-                         a, objectness, maxClassProb, confMethod1, confMethod2, x_center, y_center, width, height);
+                    LOGF("HIGH CONF anchor %zu: maxClass=%.3f, conf=%.3f, bbox=[%.1f,%.1f,%.1f,%.1f]",
+                         a, maxClassProb, confidence, x_center, y_center, width, height);
                     
                     // Show all class scores for best anchors
                     if (a >= 6930 && a <= 6940) {
                         LOGF("  All classes for anchor %zu:", a);
-                        for (int c = 0; c < 4; c++) {
+                        for (int c = 0; c < 5; c++) {  // 5 classes: features 5-9
                             float raw = getVal(a, 5 + c);
                             float prob = sigmoid(raw);
                             LOGF("    Class[%d]: raw=%.3f, sigmoid=%.3f", c, raw, prob);
@@ -457,8 +462,8 @@ public:
                 
                 // Log detections above 70% (the target threshold) 
                 if (confidence > 0.70f) {
-                    LOGF("TARGET CONFIDENCE %zu: class=%d, obj=%.3f, classProb=%.3f, conf=%.3f, bbox=[%.1f,%.1f,%.1f,%.1f]", 
-                         a, classIdx, objectness, maxClassProb, confidence, 
+                    LOGF("TARGET CONFIDENCE %zu: class=%d, classProb=%.3f, conf=%.3f, bbox=[%.1f,%.1f,%.1f,%.1f]", 
+                         a, classIdx, maxClassProb, confidence, 
                          x_center, y_center, width, height);
                 }
                 
@@ -477,14 +482,11 @@ public:
             
             // Show all detections above 40% using adaptive indexing
             for (size_t a = 0; a < anchors && a < 100; a++) { // Limit to first 100 to avoid spam
-                // Get objectness and class scores using adaptive indexing
-                float objectness_raw = getVal(a, 4);
-                float objectness = sigmoid(objectness_raw);
-                
+                // Get class scores using adaptive indexing (no objectness in this model)
                 float maxClassProb = 0.0f;
                 int classIdx = -1;
-                for (int c = 0; c < 4; c++) {
-                    float classProb_raw = getVal(a, 5 + c);
+                for (int c = 0; c < 5; c++) {  // 5 classes: features 4-8
+                    float classProb_raw = getVal(a, 4 + c);
                     float classProb = sigmoid(classProb_raw);
                     if (classProb > maxClassProb) {
                         maxClassProb = classProb;
@@ -500,23 +502,36 @@ public:
                     float w = getVal(a, 2);
                     float h = getVal(a, 3);
                     
-                    LOGF("DETECTION[%zu]: {\"type\":\"license_plate\", \"confidence\":%.3f, \"x\":%d, \"y\":%d, \"width\":%d, \"height\":%d, \"model\":\"unified-detection-v7.onnx\"}", 
-                         a, confidence, (int)(x * width / 640.0f), (int)(y * height / 640.0f), 
+                    LOGF("DETECTION[%zu]: {\"type\":\"%s\", \"confidence\":%.3f, \"x\":%d, \"y\":%d, \"width\":%d, \"height\":%d, \"model\":\"unified-detection-v7.onnx\"}", 
+                         a, getClassName(classIdx), confidence, (int)(x * width / 640.0f), (int)(y * height / 640.0f), 
                          (int)(w * width / 640.0f), (int)(h * height / 640.0f));
                 }
             }
             
-            LOGF("Best detection: class=%d, conf=%.3f, x=%.3f, y=%.3f, w=%.3f, h=%.3f", 
-                 bestClass, bestConfidence, bestX, bestY, bestW, bestH);
+            LOGF("=== COORDINATE DEBUG: Raw ONNX Results ===");
+            LOGF("Best detection: class=%d, conf=%.3f", bestClass, bestConfidence);
+            LOGF("Raw ONNX coordinates (640x640 space): x=%.1f, y=%.1f, w=%.1f, h=%.1f", 
+                 bestX, bestY, bestW, bestH);
+            LOGF("ONNX coordinate format: (x,y) likely represents %s", 
+                 "center of bounding box in YOLO format");
             
             std::vector<float> results;
             if (bestConfidence > 0.0f) {
-                // Normalize coordinates from pixel space to [0,1]
+                // DEBUG: Try using raw ONNX coordinates directly first
+                // to see if the issue is in transformation or elsewhere
+                LOGF("Raw ONNX coordinates: x=%.1f, y=%.1f, w=%.1f, h=%.1f (640x640 space)", 
+                     bestX, bestY, bestW, bestH);
+                
+                // Return raw ONNX coordinates normalized to [0,1] for 640x640 space
                 results.push_back(bestConfidence);
-                results.push_back(bestX / 640.0f);
-                results.push_back(bestY / 640.0f);
-                results.push_back(bestW / 640.0f);
-                results.push_back(bestH / 640.0f);
+                results.push_back(bestX / 640.0f);         // x in [0,1]
+                results.push_back(bestY / 640.0f);         // y in [0,1] 
+                results.push_back(bestW / 640.0f);         // w in [0,1]
+                results.push_back(bestH / 640.0f);         // h in [0,1]
+                results.push_back(bestClass);              // class index
+                
+                LOGF("Returning normalized coords: x=%.3f, y=%.3f, w=%.3f, h=%.3f", 
+                     bestX/640.0f, bestY/640.0f, bestW/640.0f, bestH/640.0f);
             }
             return results;
             
@@ -607,14 +622,33 @@ public:
                 return make_jstring("{\"detections\":[]}");
             }
             
-            // results format: [confidence, x, y, w, h]
+            // results format: [confidence, x, y, w, h, classIdx] - already in normalized [0,1] coordinates
+            int detectedClass = (int)results[5];
+            LOGF("Raw results: conf=%.3f, x=%.3f, y=%.3f, w=%.3f, h=%.3f, class=%d (%s)", 
+                 results[0], results[1], results[2], results[3], results[4], detectedClass, getClassName(detectedClass));
+            
+            // Convert normalized coordinates back to camera frame pixels for UI
+            LOGF("=== COORDINATE DEBUG: C++ Transformation ===");
+            LOGF("Normalized coords from ONNX: x=%.3f, y=%.3f, w=%.3f, h=%.3f", 
+                 results[1], results[2], results[3], results[4]);
+            
+            int pixelX = (int)(results[1] * 640);   // Convert 0.378 to ~242 pixels in 640x640 ONNX space
+            int pixelY = (int)(results[2] * 640);   // Convert 0.491 to ~314 pixels in 640x640 ONNX space  
+            int pixelW = (int)(results[3] * 640);   // Convert 0.227 to ~145 pixels
+            int pixelH = (int)(results[4] * 640);   // Convert 0.070 to ~45 pixels
+            
+            LOGF("Converted to 640x640 pixels: x=%d, y=%d, w=%d, h=%d", 
+                 pixelX, pixelY, pixelW, pixelH);
+            LOGF("These coordinates are in PADDED 640x640 space with 90° CCW rotation applied");
+            LOGF("Original camera was 640x480 -> rotated to 480x640 -> padded to 640x640");
+            
             std::string json = "{\"detections\":[{";
-            json += "\"type\":\"license_plate\",";
+            json += "\"type\":\"" + std::string(getClassName(detectedClass)) + "\",";
             json += "\"confidence\":" + std::to_string(results[0]) + ",";
-            json += "\"x\":" + std::to_string((int)(results[1] * width)) + ",";
-            json += "\"y\":" + std::to_string((int)(results[2] * height)) + ",";
-            json += "\"width\":" + std::to_string((int)(results[3] * width)) + ",";
-            json += "\"height\":" + std::to_string((int)(results[4] * height)) + ",";
+            json += "\"x\":" + std::to_string(pixelX) + ",";
+            json += "\"y\":" + std::to_string(pixelY) + ",";
+            json += "\"width\":" + std::to_string(pixelW) + ",";
+            json += "\"height\":" + std::to_string(pixelH) + ",";
             json += "\"model\":\"unified-detection-v7.onnx\"";
             json += "}]}";
             
