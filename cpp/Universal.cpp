@@ -17,6 +17,8 @@
 #include "preprocessing/FrameConverter.h"
 #include "preprocessing/ImageRotation.h"
 #include "preprocessing/WhitePadding.h"
+#include "preprocessing/ImageDebugger.h"
+#include "OnnxProcessor.h"
 
 #define LOGF(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "UniversalNative", fmt, ##__VA_ARGS__)
 
@@ -174,6 +176,11 @@ public:
             const uint8_t* uPlane = frameData + ySize;
             const uint8_t* vPlane = frameData + ySize + uvSize;
             
+            // DEBUG: Save raw YUV frame before any processing
+            LOGF("DEBUG: Saving raw YUV frame (%dx%d)", width, height);
+            UniversalScanner::ImageDebugger::saveYUV420("0_raw_yuv.jpg", 
+                yPlane, uPlane, vPlane, width, height, width, width / 2);
+            
             // Convert YUV planes to RGB
             std::vector<uint8_t> rgbData = UniversalScanner::FrameConverter::convertI420toRGB(
                 yPlane, uPlane, vPlane, width, height, width, width / 2
@@ -184,17 +191,23 @@ public:
                 return empty;
             }
             
-            // Step 2: Apply 90° CCW rotation if needed (640x480 -> 480x640)
+            // DEBUG: Save RGB data after YUV conversion
+            LOGF("DEBUG: Saving RGB data after YUV conversion (%dx%d)", width, height);
+            UniversalScanner::ImageDebugger::saveRGB("1_rgb_converted.jpg", rgbData, width, height);
+            
+            // Step 2: Apply 90° CW rotation if needed (640x480 -> 480x640)
             size_t frameWidth = width;
             size_t frameHeight = height;
             
-            if (frameWidth > frameHeight) { // 640x480 needs rotation
-                LOGF("Step 2: Applying 90° CCW rotation (%zux%zu -> %zux%zu)", frameWidth, frameHeight, frameHeight, frameWidth);
-                rgbData = UniversalScanner::ImageRotation::rotate90CCW(rgbData, frameWidth, frameHeight);
-                std::swap(frameWidth, frameHeight); // Now 480x640
-            } else {
-                LOGF("Step 2: No rotation needed for %zux%zu", frameWidth, frameHeight);
-            }
+            // Apply 90° CW rotation to fix orientation from emulator  
+            LOGF("Step 2: Applying 90° CW rotation to fix orientation (%zux%zu)", frameWidth, frameHeight);
+            rgbData = UniversalScanner::ImageRotation::rotate90CW(rgbData, frameWidth, frameHeight);
+            // Dimensions are swapped for 90° rotation
+            std::swap(frameWidth, frameHeight); // 640x480 -> 480x640
+            
+            // DEBUG: Save RGB data after rotation
+            LOGF("DEBUG: Saving RGB data after 90° CW rotation (%zux%zu)", frameWidth, frameHeight);
+            UniversalScanner::ImageDebugger::saveRGB("2_rotated.jpg", rgbData, frameWidth, frameHeight);
             
             // Step 3: Apply white padding to make it square 640x640
             LOGF("Step 3: Applying white padding to %zux%zu -> 640x640", frameWidth, frameHeight);
@@ -208,6 +221,10 @@ public:
                 std::vector<float> empty;
                 return empty;
             }
+            
+            // DEBUG: Save padded tensor data
+            LOGF("DEBUG: Saving padded tensor data (640x640)");
+            UniversalScanner::ImageDebugger::saveTensor("3_padded.jpg", inputTensor, 640, 640);
             
             LOGF("Real frame preprocessing completed - padded to 640x640, first few pixels: %.3f %.3f %.3f", 
                  inputTensor[0], inputTensor[1], inputTensor[2]);
@@ -467,7 +484,7 @@ public:
                          x_center, y_center, width, height);
                 }
                 
-                if (confidence > bestConfidence && confidence > 0.25f) {
+                if (confidence > bestConfidence && confidence > 0.55f) {
                     bestConfidence = confidence;
                     bestX = x_center;
                     bestY = y_center;
@@ -480,7 +497,7 @@ public:
             LOGF("Detection stats: %d candidates >10%%, %d >25%%, %d >50%%, %d >70%%. Best: %.3f%%", 
                  candidatesAbove10, candidatesAbove25, candidatesAbove50, candidatesAbove70, bestConfidence * 100);
             
-            // Show all detections above 40% using adaptive indexing
+            // Show all detections above 55% using adaptive indexing
             for (size_t a = 0; a < anchors && a < 100; a++) { // Limit to first 100 to avoid spam
                 // Get class scores using adaptive indexing (no objectness in this model)
                 float maxClassProb = 0.0f;
@@ -496,7 +513,7 @@ public:
                 // Use same confidence calculation as main loop
                 float confidence = maxClassProb;  // Just class probability
                 
-                if (confidence > 0.40f) { // Show all >40% detections
+                if (confidence > 0.55f) { // Show all >55% detections
                     float x = getVal(a, 0);
                     float y = getVal(a, 1);
                     float w = getVal(a, 2);
@@ -532,6 +549,10 @@ public:
                 
                 LOGF("Returning normalized coords: x=%.3f, y=%.3f, w=%.3f, h=%.3f", 
                      bestX/640.0f, bestY/640.0f, bestW/640.0f, bestH/640.0f);
+                
+                // DEBUG: Save annotated image with bounding box
+                LOGF("DEBUG: Saving annotated image with bounding box");
+                UniversalScanner::ImageDebugger::saveAnnotated("4_detections.jpg", inputTensor, 640, 640, results);
             }
             return results;
             
@@ -543,8 +564,8 @@ public:
     }
 };
 
-// Global session instance
-static std::unique_ptr<NativeOnnxSession> g_nativeSession = nullptr;
+// Global processor instance
+static std::unique_ptr<UniversalScanner::OnnxProcessor> g_onnxProcessor = nullptr;
 
 class UniversalNativeModule : public HybridClass<UniversalNativeModule> {
 public:
@@ -557,39 +578,8 @@ public:
     static void registerNatives() {
         registerHybrid({
             makeNativeMethod("initHybrid", UniversalNativeModule::initHybrid),
-            makeNativeMethod("nativeProcessFrame", UniversalNativeModule::nativeProcessFrame),
             makeNativeMethod("nativeProcessFrameWithData", UniversalNativeModule::nativeProcessFrameWithData),
         });
-    }
-    
-    // Native method that Java can call for real inference
-    local_ref<jstring> nativeProcessFrame(int width, int height) {
-        LOGF("nativeProcessFrame called with %dx%d", width, height);
-        
-        try {
-            // Initialize session if needed
-            if (!g_nativeSession) {
-                g_nativeSession = std::make_unique<NativeOnnxSession>();
-            }
-            
-            // Get JNI environment
-            JNIEnv* jniEnv = facebook::jni::Environment::current();
-            
-            // For now, pass nullptr for context - we'll load the model differently
-            jobject contextObj = nullptr;
-            
-            // Extract real frame data from VisionCamera and process it
-            LOGF("Extracting real frame data from VisionCamera...");
-            
-            // TODO: We need to extract actual frame data from VisionCamera
-            // For now, return empty until we get the Frame object passed properly
-            LOGF("Frame data extraction not implemented - need VisionCamera Frame object");
-            return make_jstring("{\"detections\":[]}");
-            
-        } catch (const std::exception& e) {
-            LOGF("Error in nativeProcessFrameWithContext: %s", e.what());
-            return make_jstring("{\"error\":\"" + std::string(e.what()) + "\"}");
-        }
     }
     
     // Native method that processes real frame data from VisionCamera
@@ -597,9 +587,9 @@ public:
         LOGF("nativeProcessFrameWithData called with %dx%d, frame data size: %zu", width, height, frameData->size());
         
         try {
-            // Initialize session if needed
-            if (!g_nativeSession) {
-                g_nativeSession = std::make_unique<NativeOnnxSession>();
+            // Initialize processor if needed
+            if (!g_onnxProcessor) {
+                g_onnxProcessor = std::make_unique<UniversalScanner::OnnxProcessor>();
             }
             
             // Get JNI environment
@@ -610,10 +600,10 @@ public:
             auto frameDataRegion = frameData->getRegion(0, dataSize);
             const uint8_t* frameBytes = reinterpret_cast<const uint8_t*>(frameDataRegion.get());
             
-            LOGF("Processing REAL VisionCamera frame: %dx%d, %zu bytes", width, height, dataSize);
+            LOGF("Processing REAL VisionCamera frame: %dx%d, %d bytes", width, height, dataSize);
             
             // Call the real ONNX processing with actual frame data
-            std::vector<float> results = g_nativeSession->processFrame(
+            std::vector<float> results = g_onnxProcessor->processFrame(
                 width, height, jniEnv, nullptr, frameBytes, dataSize
             );
             
@@ -632,10 +622,10 @@ public:
             LOGF("Normalized coords from ONNX: x=%.3f, y=%.3f, w=%.3f, h=%.3f", 
                  results[1], results[2], results[3], results[4]);
             
-            int pixelX = (int)(results[1] * 640);   // Convert 0.378 to ~242 pixels in 640x640 ONNX space
-            int pixelY = (int)(results[2] * 640);   // Convert 0.491 to ~314 pixels in 640x640 ONNX space  
-            int pixelW = (int)(results[3] * 640);   // Convert 0.227 to ~145 pixels
-            int pixelH = (int)(results[4] * 640);   // Convert 0.070 to ~45 pixels
+            int pixelX = (int)(results[1] * 640);   // Convert normalized center X to pixels in 640x640 ONNX space
+            int pixelY = (int)(results[2] * 640);   // Convert normalized center Y to pixels in 640x640 ONNX space  
+            int pixelW = (int)(results[3] * 640);   // Convert normalized width to pixels in 640x640 ONNX space
+            int pixelH = (int)(results[4] * 640);   // Convert normalized height to pixels in 640x640 ONNX space
             
             LOGF("Converted to 640x640 pixels: x=%d, y=%d, w=%d, h=%d", 
                  pixelX, pixelY, pixelW, pixelH);

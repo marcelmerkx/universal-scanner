@@ -5,7 +5,7 @@
 #include <memory>
 
 #include "TensorflowPlugin.h"
-#include "UniversalScannerPlugin.h"
+// #include "UniversalScannerPlugin.h" // DEPRECATED
 #include <ReactCommon/CallInvoker.h>
 #include <ReactCommon/CallInvokerHolder.h>
 
@@ -57,7 +57,7 @@ public:
 
     try {
       TensorflowPlugin::installToRuntime(*runtime, jsCallInvoker, fetchByteDataFromUrl);
-      UniversalScannerPlugin::install(*runtime, jsCallInvoker);
+      // UniversalScannerPlugin::install(*runtime, jsCallInvoker); // DEPRECATED
     } catch (std::exception& exc) {
       return false;
     }

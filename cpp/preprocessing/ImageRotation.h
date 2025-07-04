@@ -19,6 +19,12 @@ public:
         size_t width, size_t height
     );
     
+    // Rotate RGB image 180°
+    static std::vector<uint8_t> rotate180(
+        const std::vector<uint8_t>& rgbData,
+        size_t width, size_t height
+    );
+    
     // Check if rotation is needed based on frame orientation
     // Returns true if frame is 640x480 (portrait), false if 480x640 (landscape)
     static bool needsRotation(size_t width, size_t height) {

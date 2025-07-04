@@ -19,13 +19,42 @@ export default function NativePreprocessingApp(): React.ReactNode {
   const [fps, setFps] = React.useState(0)
   const screenDimensions = Dimensions.get('window')
   
+  // Find EXACT 1280x720 format that our coordinate transformation expects
+  const format = React.useMemo(() => {
+    if (!device?.formats) return undefined
+    
+    // Look for EXACT 1280x720 format (for the time being; later more tolerant)
+    const requiredFormat = device.formats.find(format => {
+      return format.videoWidth === 1280 && format.videoHeight === 720
+    })
+    
+    if (!requiredFormat) {
+      console.error('CAMERA FORMAT ERROR: Could not find EXACT 1280x720 format!')
+      console.error('Available formats:', device.formats.map(f => `${f.videoWidth}x${f.videoHeight} (${(f.videoWidth/f.videoHeight).toFixed(2)}:1)`))
+      throw new Error('Required camera format not available. Need EXACT 1280x720 format for coordinate transformation.')
+    }
+    
+    return requiredFormat
+  }, [device?.formats])
+  
   React.useEffect(() => {
     console.log('Screen dimensions:', screenDimensions)
   }, [screenDimensions])
   
+  React.useEffect(() => {
+    if (format) {
+      console.log('Selected camera format:', {
+        width: format.videoWidth,
+        height: format.videoHeight,
+        aspectRatio: (format.videoWidth / format.videoHeight).toFixed(3),
+        fps: format.maxFps
+      })
+    }
+  }, [format])
+  
   // Load ONNX model for JavaScript processing (switching from native to test)
-  const onnxModel = useOnnxModel(require('../assets/unified-detection-v7.onnx'), 'cpu')
-  const { resize } = useResizePlugin()
+  // const onnxModel = useOnnxModel(require('../assets/unified-detection-v7.onnx'), 'cpu')
+  // const { resize } = useResizePlugin()
   
   // Initialize VisionCamera plugin (keep for comparison)
   const universalScanner = VisionCameraProxy.initFrameProcessorPlugin('universalScanner')
@@ -34,16 +63,16 @@ export default function NativePreprocessingApp(): React.ReactNode {
     console.log('universalScanner plugin initialized:', typeof universalScanner, universalScanner)
   }, [universalScanner])
   
-  React.useEffect(() => {
-    console.log('ONNX model state:', onnxModel.state)
-    console.log('ONNX model object:', onnxModel.model)
-    if (onnxModel.state === 'loaded') {
-      console.log('ONNX model loaded successfully for JavaScript processing!')
-      console.log('Model methods:', onnxModel.model ? Object.keys(onnxModel.model) : 'model is null')
-    } else if (onnxModel.state === 'error') {
-      console.error('ONNX model loading failed:', onnxModel.error)
-    }
-  }, [onnxModel.state, onnxModel.model])
+  // React.useEffect(() => {
+  //   console.log('ONNX model state:', onnxModel.state)
+  //   console.log('ONNX model object:', onnxModel.model)
+  //   if (onnxModel.state === 'loaded') {
+  //     console.log('ONNX model loaded successfully for JavaScript processing!')
+  //     console.log('Model methods:', onnxModel.model ? Object.keys(onnxModel.model) : 'model is null')
+  //   } else if (onnxModel.state === 'error') {
+  //     console.error('ONNX model loading failed:', onnxModel.error)
+  //   }
+  // }, [onnxModel.state, onnxModel.model])
   
   // Track FPS
   const frameCount = React.useRef(0)
@@ -114,35 +143,116 @@ export default function NativePreprocessingApp(): React.ReactNode {
           const onnxW = parseInt(detection.width)  // Width in 640x640 space
           const onnxH = parseInt(detection.height) // Height in 640x640 space
           
-          // The ONNX coordinates are inverted on both axes
-          // Use UNIFORM scaling to maintain aspect ratio
-          // The ONNX space is 640x640 square, but screen is not square
-          const uniformScale = Math.min(screenDimensions.width / 640, screenDimensions.height / 640)
+          console.log(`Raw C++ coordinates: (${onnxX},${onnxY}) size=${onnxW}×${onnxH}`)
           
-          // Calculate offsets to center the 640x640 space on screen
-          const offsetX = (screenDimensions.width - 640 * uniformScale) / 2
-          const offsetY = (screenDimensions.height - 640 * uniformScale) / 2
+          // ROTATION-AWARE COORDINATE TRANSFORMATION
+          // Account for: Camera → 90°CW rotation → padding → ONNX → screen crop
           
-          // Flip and scale coordinates uniformly
-          const screenX = (640 - onnxX) * uniformScale + offsetX
-          const screenY = (640 - onnxY) * uniformScale + offsetY
+          const modelSize = 640
+          const cameraFormat = format || { videoWidth: 1280, videoHeight: 720 }
           
-          // Scale dimensions uniformly
-          const screenW = onnxW * uniformScale
-          const screenH = onnxH * uniformScale
+          // After 90° CW rotation: 1280×720 becomes 720×1280
+          const rotatedCameraWidth = cameraFormat.videoHeight   // 720
+          const rotatedCameraHeight = cameraFormat.videoWidth   // 1280
           
-          // Convert from center coordinates to top-left for React Native positioning
-          const boxLeft = screenX - screenW / 2
-          const boxTop = screenY - screenH / 2
+          console.log(`Camera: ${cameraFormat.videoWidth}×${cameraFormat.videoHeight} → Rotated: ${rotatedCameraWidth}×${rotatedCameraHeight}`)
+          console.log(`Screen: ${screenDimensions.width}×${screenDimensions.height}`)
+          console.log(`Model: ${modelSize}×${modelSize}`)
           
-          console.log(`=== COORDINATE TRANSFORMATION (UNIFORM SCALING) ===`)
-          console.log(`ONNX coordinates (640x640): center=(${onnxX},${onnxY}), size=${onnxW}×${onnxH}`)
-          console.log(`Screen dimensions: ${screenDimensions.width}×${screenDimensions.height}`)
-          console.log(`Uniform scale: ${uniformScale.toFixed(3)} (maintains aspect ratio)`)
-          console.log(`Offsets: X=${offsetX.toFixed(1)}, Y=${offsetY.toFixed(1)}`)
-          console.log(`Flipped & scaled center: (${screenX.toFixed(1)},${screenY.toFixed(1)})`)
-          console.log(`Scaled size: ${screenW.toFixed(1)}×${screenH.toFixed(1)}`)
-          console.log(`Bounding box: left=${boxLeft.toFixed(1)}, top=${boxTop.toFixed(1)}`)
+          // Step 1: Understand padding in ONNX space
+          // 720×1280 image needs to fit in 640×640
+          // Scale factor to fit: min(640/720, 640/1280) = 0.5
+          const onnxScale = Math.min(modelSize / rotatedCameraWidth, modelSize / rotatedCameraHeight)
+          const scaledWidth = rotatedCameraWidth * onnxScale    // 720 * 0.5 = 360
+          const scaledHeight = rotatedCameraHeight * onnxScale  // 1280 * 0.5 = 640
+          
+          // Padding applied TOP-LEFT aligned (C++ WhitePadding implementation)
+          const paddingLeft = 0     // Image starts at x=0
+          const paddingTop = 0      // Image starts at y=0
+          
+          console.log(`ONNX padding: left=${paddingLeft}, top=${paddingTop}, scale=${onnxScale.toFixed(3)}`)
+          
+          // Step 2: Convert ONNX center coordinates to rotated camera coordinates
+          // IMPORTANT: ONNX returns CENTER coordinates (x_center, y_center) in YOLO format
+          // We need to convert these center coordinates properly
+          
+          // First, check if detection center is within the padded content area
+          if (onnxX < paddingLeft || onnxX > (paddingLeft + scaledWidth)) {
+            console.log(`Detection center X (${onnxX}) outside content area [${paddingLeft}, ${paddingLeft + scaledWidth}]`)
+          }
+          
+          // Map from padded ONNX space to original rotated camera space
+          // These are CENTER coordinates, so we map the center point
+          const contentCenterX = onnxX - paddingLeft  // Center position within scaled content
+          const contentCenterY = onnxY - paddingTop   // Center position within scaled content
+          
+          const unpaddedCenterX = contentCenterX / onnxScale  // Scale back to original size
+          const unpaddedCenterY = contentCenterY / onnxScale
+          const unpaddedW = onnxW / onnxScale
+          const unpaddedH = onnxH / onnxScale
+          
+          // Convert from center coordinates to top-left for easier processing
+          const unpaddedX = unpaddedCenterX - unpaddedW / 2
+          const unpaddedY = unpaddedCenterY - unpaddedH / 2
+          
+          console.log(`Unpadded center: (${unpaddedCenterX.toFixed(1)},${unpaddedCenterY.toFixed(1)}) -> top-left: (${unpaddedX.toFixed(1)},${unpaddedY.toFixed(1)}) size=${unpaddedW.toFixed(1)}×${unpaddedH.toFixed(1)}`)
+          
+          // Step 3: Calculate screen crop (resizeMode="cover")
+          // VisionCamera scales the rotated camera to cover the screen
+          const screenAspect = screenDimensions.width / screenDimensions.height
+          const rotatedCameraAspect = rotatedCameraWidth / rotatedCameraHeight
+          
+          let visibleWidthFraction = 1, visibleHeightFraction = 1
+          let cropOffsetX = 0, cropOffsetY = 0
+          
+          if (screenAspect > rotatedCameraAspect) {
+            // Screen is wider - crop top/bottom
+            const scale = screenDimensions.width / rotatedCameraWidth
+            const scaledHeight = rotatedCameraHeight * scale
+            visibleHeightFraction = screenDimensions.height / scaledHeight
+            cropOffsetY = (1 - visibleHeightFraction) / 2
+          } else {
+            // Screen is taller - crop left/right
+            const scale = screenDimensions.height / rotatedCameraHeight
+            const scaledWidth = rotatedCameraWidth * scale
+            visibleWidthFraction = screenDimensions.width / scaledWidth
+            cropOffsetX = (1 - visibleWidthFraction) / 2
+          }
+          
+          console.log(`Screen crop: visibleWidth=${(visibleWidthFraction*100).toFixed(1)}%, visibleHeight=${(visibleHeightFraction*100).toFixed(1)}%`)
+          console.log(`Crop offsets: X=${(cropOffsetX*100).toFixed(1)}%, Y=${(cropOffsetY*100).toFixed(1)}%`)
+          
+          // Step 4: Map to screen coordinates if within visible bounds  
+          // Use CENTER coordinates for proper mapping to screen space
+          const normalizedX = unpaddedCenterX / rotatedCameraWidth
+          const normalizedY = unpaddedCenterY / rotatedCameraHeight
+          
+          const croppedX = (normalizedX - cropOffsetX) / visibleWidthFraction
+          const croppedY = (normalizedY - cropOffsetY) / visibleHeightFraction
+          
+          // Check if the detection is within the visible area
+          const isVisible = croppedX >= 0 && croppedX <= 1 && croppedY >= 0 && croppedY <= 1
+          
+          if (!isVisible) {
+            console.log(`Detection outside visible area: croppedX=${croppedX.toFixed(3)}, croppedY=${croppedY.toFixed(3)}`)
+            return null
+          }
+          
+          // croppedX,croppedY are the CENTER coordinates in normalized screen space
+          const screenCenterX = croppedX * screenDimensions.width
+          const screenCenterY = croppedY * screenDimensions.height
+          const screenW = (unpaddedW / rotatedCameraWidth / visibleWidthFraction) * screenDimensions.width
+          const screenH = (unpaddedH / rotatedCameraHeight / visibleHeightFraction) * screenDimensions.height
+          
+          // Convert from center coordinates to top-left for React Native View
+          const boxLeft = screenCenterX - screenW / 2
+          const boxTop = screenCenterY - screenH / 2
+          
+          console.log(`=== ROTATION-AWARE MAPPING ===`)
+          console.log(`Normalized in camera: (${normalizedX.toFixed(3)},${normalizedY.toFixed(3)})`)
+          console.log(`After crop adjustment: (${croppedX.toFixed(3)},${croppedY.toFixed(3)})`)
+          console.log(`Screen center: (${screenCenterX.toFixed(1)},${screenCenterY.toFixed(1)})`)
+          console.log(`Final box: left=${boxLeft.toFixed(1)}, top=${boxTop.toFixed(1)}, size=${screenW.toFixed(1)}×${screenH.toFixed(1)}`)
           
           return (
             <React.Fragment key={index}>
@@ -203,6 +313,8 @@ export default function NativePreprocessingApp(): React.ReactNode {
             frameProcessor={frameProcessor}
             pixelFormat="yuv"
             enableFpsGraph={true}
+            format={format}
+            resizeMode="cover"
           />
           <View style={styles.overlay}>
             <Text style={styles.fps}>FPS: {fps}</Text>
@@ -213,6 +325,20 @@ export default function NativePreprocessingApp(): React.ReactNode {
             {renderResult()}
           </View>
           
+          {/* Debug Grid Overlay */}
+          <View style={styles.debugGrid} pointerEvents="none">
+            {Array.from({ length: 11 }, (_, i) => (
+              <View key={`h-${i}`} style={[styles.gridLineHorizontal, { top: `${i * 10}%` }]}>
+                <Text style={styles.gridLabel}>{i * 10}%</Text>
+              </View>
+            ))}
+            {Array.from({ length: 11 }, (_, i) => (
+              <View key={`v-${i}`} style={[styles.gridLineVertical, { left: `${i * 10}%` }]}>
+                <Text style={styles.gridLabelVertical}>{i * 10}%</Text>
+              </View>
+            ))}
+          </View>
+
           {/* Bounding Box Overlay */}
           {renderBoundingBoxes()}
           
@@ -397,5 +523,44 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderRadius: 3,
     overflow: 'hidden',
+  },
+  debugGrid: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    pointerEvents: 'none',
+  },
+  gridLineHorizontal: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  gridLineVertical: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  gridLabel: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 8,
+    fontWeight: 'bold',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    paddingHorizontal: 2,
+    paddingVertical: 1,
+  },
+  gridLabelVertical: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 8,
+    fontWeight: 'bold',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    paddingHorizontal: 2,
+    paddingVertical: 1,
+    transform: [{ rotate: '90deg' }],
   },
 })

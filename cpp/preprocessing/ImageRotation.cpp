@@ -115,4 +115,35 @@ void ImageRotation::rotateBlock90CCW(
     }
 }
 
+std::vector<uint8_t> ImageRotation::rotate180(
+    const std::vector<uint8_t>& rgbData,
+    size_t width, size_t height
+) {
+    std::vector<uint8_t> rotated(rgbData.size());
+    
+    // For 180° rotation:
+    // Source (x, y) -> Destination (width - 1 - x, height - 1 - y)
+    // Width and height remain the same
+    
+    const size_t channels = 3;
+    
+    for (size_t y = 0; y < height; y++) {
+        for (size_t x = 0; x < width; x++) {
+            size_t srcIdx = (y * width + x) * channels;
+            
+            // 180° rotation
+            size_t dstX = width - 1 - x;
+            size_t dstY = height - 1 - y;
+            size_t dstIdx = (dstY * width + dstX) * channels;
+            
+            // Copy RGB pixels
+            rotated[dstIdx] = rgbData[srcIdx];         // R
+            rotated[dstIdx + 1] = rgbData[srcIdx + 1]; // G
+            rotated[dstIdx + 2] = rgbData[srcIdx + 2]; // B
+        }
+    }
+    
+    return rotated;
+}
+
 } // namespace UniversalScanner

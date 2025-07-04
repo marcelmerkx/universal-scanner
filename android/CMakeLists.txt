@@ -45,7 +45,6 @@ add_library(
   ../cpp/TensorHelpers.cpp
   ../cpp/OnnxPlugin.cpp
   ../cpp/OnnxHelpers.cpp
-  ../cpp/UniversalScannerPlugin.cpp
   ../cpp/preprocessing/FrameConverter.cpp
   ../cpp/preprocessing/ImageRotation.cpp
   ../cpp/preprocessing/WhitePadding.cpp
@@ -95,10 +94,12 @@ endif()
 add_library(
   universal
   SHARED
-  src/main/cpp/Universal.cpp
+  ../cpp/Universal.cpp
+  ../cpp/OnnxProcessor.cpp
   ../cpp/preprocessing/FrameConverter.cpp
   ../cpp/preprocessing/ImageRotation.cpp
   ../cpp/preprocessing/WhitePadding.cpp
+  ../cpp/preprocessing/ImageDebugger.cpp
 )
 
 target_include_directories(
@@ -107,6 +108,13 @@ target_include_directories(
   "../cpp"
   "src/main/cpp"
   "src/main/cpp/lib/onnxruntime/headers"
+  "src/main/cpp/lib/stb"
+)
+
+target_compile_definitions(
+  universal
+  PRIVATE
+  DEBUG  # Enable debug images for universal module only
 )
 
 target_link_libraries(
