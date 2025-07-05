@@ -604,29 +604,29 @@ public:
             LOGF("Processing REAL VisionCamera frame: %dx%d, %d bytes", width, height, dataSize);
             
             // Call the real ONNX processing with actual frame data
-            std::vector<float> results = g_onnxProcessor->processFrame(
+            UniversalScanner::DetectionResult result = g_onnxProcessor->processFrame(
                 width, height, jniEnv, nullptr, frameBytes, dataSize
             );
             
             // Format results as JSON
-            if (results.empty()) {
+            if (!result.isValid()) {
                 return make_jstring("{\"detections\":[]}");
             }
             
-            // results format: [confidence, x, y, w, h, classIdx] - already in normalized [0,1] coordinates
-            int detectedClass = (int)results[5];
+            // Structured result with normalized [0,1] coordinates
             LOGF("Raw results: conf=%.3f, x=%.3f, y=%.3f, w=%.3f, h=%.3f, class=%d (%s)", 
-                 results[0], results[1], results[2], results[3], results[4], detectedClass, getClassName(detectedClass));
+                 result.confidence, result.centerX, result.centerY, result.width, result.height, 
+                 result.classIndex, getClassName(result.classIndex));
             
             // Convert normalized coordinates back to camera frame pixels for UI
             LOGF("=== COORDINATE DEBUG: C++ Transformation ===");
             LOGF("Normalized coords from ONNX: x=%.3f, y=%.3f, w=%.3f, h=%.3f", 
-                 results[1], results[2], results[3], results[4]);
+                 result.centerX, result.centerY, result.width, result.height);
             
-            int pixelX = (int)(results[1] * 640);   // Convert normalized center X to pixels in 640x640 ONNX space
-            int pixelY = (int)(results[2] * 640);   // Convert normalized center Y to pixels in 640x640 ONNX space  
-            int pixelW = (int)(results[3] * 640);   // Convert normalized width to pixels in 640x640 ONNX space
-            int pixelH = (int)(results[4] * 640);   // Convert normalized height to pixels in 640x640 ONNX space
+            int pixelX = (int)(result.centerX * 640);   // Convert normalized center X to pixels in 640x640 ONNX space
+            int pixelY = (int)(result.centerY * 640);   // Convert normalized center Y to pixels in 640x640 ONNX space  
+            int pixelW = (int)(result.width * 640);     // Convert normalized width to pixels in 640x640 ONNX space
+            int pixelH = (int)(result.height * 640);    // Convert normalized height to pixels in 640x640 ONNX space
             
             LOGF("Converted to 640x640 pixels: x=%d, y=%d, w=%d, h=%d", 
                  pixelX, pixelY, pixelW, pixelH);
@@ -634,8 +634,8 @@ public:
             LOGF("Original camera was 640x480 -> rotated to 480x640 -> padded to 640x640");
             
             std::string json = "{\"detections\":[{";
-            json += "\"type\":\"" + std::string(getClassName(detectedClass)) + "\",";
-            json += "\"confidence\":" + std::to_string(results[0]) + ",";
+            json += "\"type\":\"" + std::string(getClassName(result.classIndex)) + "\",";
+            json += "\"confidence\":" + std::to_string(result.confidence) + ",";
             json += "\"x\":" + std::to_string(pixelX) + ",";
             json += "\"y\":" + std::to_string(pixelY) + ",";
             json += "\"width\":" + std::to_string(pixelW) + ",";

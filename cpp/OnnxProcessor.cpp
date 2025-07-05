@@ -95,15 +95,14 @@ bool OnnxProcessor::initializeModel() {
 // [The processFrame method implementation would go here - it's very long]
 // For now I'll add a stub and we can move the implementation
 
-std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* env, jobject context, 
-                                               const uint8_t* frameData, size_t frameSize) {
+DetectionResult OnnxProcessor::processFrame(int width, int height, JNIEnv* env, jobject context, 
+                                            const uint8_t* frameData, size_t frameSize) {
     // Initialize model if not already loaded
     if (!modelLoaded) {
         LOGF("Attempting to initialize ONNX model...");
         if (!initializeModel()) {
             LOGF("Failed to initialize ONNX model!");
-            std::vector<float> empty;
-            return empty; // Return empty - NO MOCKING
+            return {}; // Return empty DetectionResult - NO MOCKING
         }
     }
     
@@ -126,8 +125,7 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
     
     if (!modelLoaded || !session) {
         LOGF("Model not loaded!");
-        std::vector<float> empty;
-        return empty; // Return empty - NO MOCKING
+        return {}; // Return empty - NO MOCKING
     }
     
     try {
@@ -136,8 +134,7 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
         // Extract real camera frame data - NO FALLBACKS, NO MOCK DATA
         if (!frameData || frameSize == 0) {
             LOGF("ERROR: No real frame data provided - cannot proceed without real camera data");
-            std::vector<float> empty;
-            return empty;
+            return {};
         }
         
         LOGF("Processing REAL camera frame data: %zu bytes", frameSize);
@@ -221,14 +218,12 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
         } else {
             LOGF("ERROR: Platform-specific YUV converter not available - cannot proceed");
             LOGF("Legacy YUV conversion has been deprecated due to stride/format issues");
-            std::vector<float> empty;
-            return empty;
+            return {};
         }
         
         if (rgbData.empty()) {
             LOGF("ERROR: YUV to RGB conversion failed");
-            std::vector<float> empty;
-            return empty;
+            return {};
         }
         
         // DEBUG: Save RGB data after YUV conversion
@@ -262,8 +257,7 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
         
         if (inputTensor.empty()) {
             LOGF("ERROR: White padding failed");
-            std::vector<float> empty;
-            return empty;
+            return {};
         }
         
         // DEBUG: Save padded tensor data
@@ -325,45 +319,28 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
             return 1.0f / (1.0f + std::exp(-x));
         };
         
-        // Parse using proper indexing: [batch, features, anchors] layout
-        float bestConfidence = 0.0f;
-        float bestX = 0.0f, bestY = 0.0f, bestW = 0.0f, bestH = 0.0f;
-        int bestClass = -1;
-        
-        // Determine tensor format - could be [1, 9, 8400] or [1, 8400, 9]
-        bool isFeaturesMajor = true; // [1, 9, 8400] format
-        
-        // Sample a few anchors to determine format
-        float sample_obj_fm = output[4 * anchors + 100]; // features-major format
-        float sample_obj_am = output[100 * features + 4]; // anchors-major format
-        
-        // YOLO objectness logits should be in range ~[-10, 10], not 20+
-        if (std::abs(sample_obj_fm) > 15.0f && std::abs(sample_obj_am) < 15.0f) {
-            isFeaturesMajor = false;
-            LOGF("Detected tensor format: [1, 8400, 9] (anchors-major)");
-        } else {
-            LOGF("Detected tensor format: [1, 9, 8400] (features-major)");
+        // ASSERT expected tensor format - NO FALLBACKS
+        // Our unified-detection-v7.onnx model MUST output [1, 9, 8400] format
+        if (outputShape[1] != 9 || outputShape[2] != 8400) {
+            LOGF("ERROR: Model output shape [%ld, %ld, %ld] does not match expected [1, 9, 8400]", 
+                 (long)outputShape[0], (long)outputShape[1], (long)outputShape[2]);
+            LOGF("This indicates the wrong model or incorrect export format");
+            return {}; // FAIL LOUDLY - NO GUESSING
         }
         
-        // Helper lambda for adaptive indexing
+        LOGF("Model output format validated: [1, 9, 8400] (features-major)");
+        
+        // Direct indexing for [1, 9, 8400] format: feature * anchors + anchor
         auto getVal = [&](size_t anchorIdx, size_t featureIdx) -> float {
-            if (isFeaturesMajor) {
-                // [1, 9, 8400] format: feature * anchors + anchor
-                return output[featureIdx * anchors + anchorIdx];
-            } else {
-                // [1, 8400, 9] format: anchor * features + feature
-                return output[anchorIdx * features + featureIdx];
-            }
+            return output[featureIdx * anchors + anchorIdx];
         };
         
-        // Process all anchors with adaptive indexing
+        // Find the best anchor - only extract coordinates for the winner
+        size_t bestAnchor = 0;
+        float bestConfidence = 0.0f;
+        int bestClass = -1;
+        
         for (size_t a = 0; a < anchors; a++) {
-            // Get raw bbox coordinates (features 0-3) - these are in YOLO format
-            float x_center = getVal(a, 0);
-            float y_center = getVal(a, 1);
-            float width_f   = getVal(a, 2);
-            float height_f  = getVal(a, 3);
-            
             // This model has NO objectness score! Just 5 class scores directly
             // Features 4-8: 5 class probabilities 
             float maxClassProb = 0.0f;
@@ -382,35 +359,44 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
             
             if (confidence > bestConfidence && confidence > 0.55f) {
                 bestConfidence = confidence;
-                bestX = x_center;
-                bestY = y_center;
-                bestW = width_f;
-                bestH = height_f;
+                bestAnchor = a;       // Remember which anchor won
                 bestClass = classIdx;
             }
         }
         
+        // Extract coordinates only for the winning anchor
+        float bestX = 0.0f, bestY = 0.0f, bestW = 0.0f, bestH = 0.0f;
+        if (bestConfidence > 0.0f) {
+            bestX = getVal(bestAnchor, 0);  // Center X
+            bestY = getVal(bestAnchor, 1);  // Center Y  
+            bestW = getVal(bestAnchor, 2);  // Width
+            bestH = getVal(bestAnchor, 3);  // Height
+        }
+        
         LOGF("Best detection: class=%d, conf=%.3f", bestClass, bestConfidence);
         
-        std::vector<float> results;
+        // Create structured result
+        DetectionResult result;
         if (bestConfidence > 0.0f) {
-            // Return raw ONNX coordinates normalized to [0,1] for 640x640 space
-            results.push_back(bestConfidence);
-            results.push_back(bestX / 640.0f);         // x in [0,1]
-            results.push_back(bestY / 640.0f);         // y in [0,1] 
-            results.push_back(bestW / 640.0f);         // w in [0,1]
-            results.push_back(bestH / 640.0f);         // h in [0,1]
-            results.push_back(bestClass);              // class index
+            // Populate detection result with normalized coordinates [0,1]
+            result.confidence = bestConfidence;
+            result.centerX = bestX / 640.0f;      // Normalize to [0,1]
+            result.centerY = bestY / 640.0f;      // Normalize to [0,1]
+            result.width = bestW / 640.0f;        // Normalize to [0,1]
+            result.height = bestH / 640.0f;       // Normalize to [0,1]
+            result.classIndex = bestClass;
             
             LOGF("Returning normalized coords: x=%.3f, y=%.3f, w=%.3f, h=%.3f", 
-                 bestX/640.0f, bestY/640.0f, bestW/640.0f, bestH/640.0f);
+                 result.centerX, result.centerY, result.width, result.height);
+        } else {
+            // Default-constructed DetectionResult has confidence=0, indicating no detection
+            result = {};
         }
-        return results;
+        return result;
         
     } catch (const Ort::Exception& e) {
         LOGF("ONNX inference error: %s", e.what());
-        std::vector<float> empty;
-        return empty; // NO FALLBACK MOCKING
+        return {}; // NO FALLBACK MOCKING
     }
 }
 

@@ -19,6 +19,22 @@
 
 namespace UniversalScanner {
 
+/**
+ * Single detection result from ONNX inference
+ * Coordinates are normalized to [0,1] range for display independence
+ */
+struct DetectionResult {
+    float confidence;    // Detection confidence [0,1]
+    float centerX;       // Center X coordinate normalized [0,1] 
+    float centerY;       // Center Y coordinate normalized [0,1]
+    float width;         // Bounding box width normalized [0,1]
+    float height;        // Bounding box height normalized [0,1]
+    int classIndex;      // Class index (0-4)
+    
+    // Helper to check if detection is valid
+    bool isValid() const { return confidence > 0.0f; }
+};
+
 class OnnxProcessor {
 private:
     std::unique_ptr<Ort::Session> session;
@@ -47,8 +63,8 @@ public:
     ~OnnxProcessor() = default;
     
     // Main processing function
-    std::vector<float> processFrame(int width, int height, JNIEnv* env, jobject context, 
-                                   const uint8_t* frameData, size_t frameSize);
+    DetectionResult processFrame(int width, int height, JNIEnv* env, jobject context, 
+                                const uint8_t* frameData, size_t frameSize);
     
     // Debug image control
     void setDebugImages(bool enabled) { enableDebugImages = enabled; }
