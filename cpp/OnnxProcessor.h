@@ -57,6 +57,14 @@ private:
     bool enableDebugImages;
 
     bool initializeModel();
+    bool initializeConverters(JNIEnv* env, jobject context);
+    
+    std::vector<uint8_t> preprocessFrame(const uint8_t* frameData, size_t frameSize, 
+                                        int width, int height, int* outWidth, int* outHeight);
+    std::vector<float> createTensorFromRGB(const std::vector<uint8_t>& rgbData, 
+                                          int width, int height);
+    DetectionResult runInference(const std::vector<float>& inputTensor);
+    DetectionResult findBestDetection(const std::vector<float>& modelOutput);
 
 public:
     OnnxProcessor();

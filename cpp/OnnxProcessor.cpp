@@ -97,307 +97,254 @@ bool OnnxProcessor::initializeModel() {
 
 DetectionResult OnnxProcessor::processFrame(int width, int height, JNIEnv* env, jobject context, 
                                             const uint8_t* frameData, size_t frameSize) {
-    // Initialize model if not already loaded
-    if (!modelLoaded) {
-        LOGF("Attempting to initialize ONNX model...");
-        if (!initializeModel()) {
-            LOGF("Failed to initialize ONNX model!");
-            return {}; // Return empty DetectionResult - NO MOCKING
-        }
-    }
-    
-    // Initialize YUV converter and resizer if not already done
-    if (!yuvConverter && env) {
-        LOGF("Initializing platform-specific YUV converter...");
-        yuvConverter = YuvConverter::create(env, context);
-        if (!yuvConverter) {
-            LOGF("Failed to create YUV converter");
-        }
-    }
-    
-    if (!yuvResizer && env) {
-        LOGF("Initializing platform-specific YUV resizer...");
-        yuvResizer = YuvResizer::create(env, context);
-        if (!yuvResizer) {
-            LOGF("Failed to create YUV resizer");
-        }
-    }
-    
-    if (!modelLoaded || !session) {
-        LOGF("Model not loaded!");
-        return {}; // Return empty - NO MOCKING
-    }
-    
     try {
-        LOGF("Running REAL ONNX inference on %dx%d frame", width, height);
+        // Initialize components
+        if (!modelLoaded && !initializeModel()) return {};
+        if (!initializeConverters(env, context)) return {};
         
-        // Extract real camera frame data - NO FALLBACKS, NO MOCK DATA
-        if (!frameData || frameSize == 0) {
-            LOGF("ERROR: No real frame data provided - cannot proceed without real camera data");
-            return {};
-        }
+        // Preprocess frame: YUV resize + RGB conversion + rotation + padding
+        int processedWidth, processedHeight;
+        auto rgbData = preprocessFrame(frameData, frameSize, width, height, &processedWidth, &processedHeight);
+        if (rgbData.empty()) return {};
         
-        LOGF("Processing REAL camera frame data: %zu bytes", frameSize);
+        // Create ONNX tensor from preprocessed image
+        auto inputTensor = createTensorFromRGB(rgbData, processedWidth, processedHeight);
+        if (inputTensor.empty()) return {};
         
-        // DEBUG: Save original YUV frame to compare with RGB conversion
-        if (enableDebugImages) {
-            LOGF("DEBUG: Saving original YUV frame for comparison (%dx%d)", width, height);
-            size_t ySize = width * height;
-            size_t uvSize = ySize / 4;
-            const uint8_t* yPlane = frameData;
-            const uint8_t* uPlane = frameData + ySize;
-            const uint8_t* vPlane = frameData + ySize + uvSize;
-            UniversalScanner::ImageDebugger::saveYUV420("0_original_yuv.jpg", 
-                yPlane, uPlane, vPlane, width, height, width, width / 2);
-        }
-        
-        // Step 1: Resize YUV for performance optimization
-        LOGF("Step 1: Resizing YUV from %dx%d to optimize processing...", width, height);
-        
-        // Calculate target size - aim for ~640 pixels on longer dimension
-        int targetWidth, targetHeight;
-        if (width > height) {
-            targetWidth = 640;
-            targetHeight = (height * 640) / width;
-        } else {
-            targetHeight = 640;
-            targetWidth = (width * 640) / height;
-        }
-        
-        // Ensure even dimensions for YUV 4:2:0 format
-        targetWidth = targetWidth & 0xFFFE;
-        targetHeight = targetHeight & 0xFFFE;
-        
-        std::vector<uint8_t> resizedYuvData;
-        int processWidth = width;
-        int processHeight = height;
-        const uint8_t* processFrameData = frameData;
-        
-        if (yuvResizer && (targetWidth < width || targetHeight < height)) {
-            LOGF("Resizing YUV: %dx%d -> %dx%d (%.1fx reduction)", 
-                 width, height, targetWidth, targetHeight, 
-                 float(width * height) / float(targetWidth * targetHeight));
-            
-            resizedYuvData = yuvResizer->resizeYuv(frameData, frameSize, 
-                                                  width, height, 
-                                                  targetWidth, targetHeight);
-            
-            if (!resizedYuvData.empty()) {
-                processWidth = targetWidth;
-                processHeight = targetHeight;
-                processFrameData = resizedYuvData.data();
-                LOGF("YUV resize successful - processing %dx%d frame", processWidth, processHeight);
-                
-                // DEBUG: Save resized YUV frame
-                if (enableDebugImages) {
-                    size_t resizedYSize = processWidth * processHeight;
-                    size_t resizedUvSize = resizedYSize / 4;
-                    const uint8_t* resizedYPlane = processFrameData;
-                    const uint8_t* resizedUPlane = processFrameData + resizedYSize;
-                    const uint8_t* resizedVPlane = processFrameData + resizedYSize + resizedUvSize;
-                    UniversalScanner::ImageDebugger::saveYUV420("0b_resized_yuv.jpg", 
-                        resizedYPlane, resizedUPlane, resizedVPlane, 
-                        processWidth, processHeight, processWidth, processWidth / 2);
-                }
-            } else {
-                LOGF("YUV resize failed - using original dimensions");
-            }
-        } else {
-            LOGF("Skipping YUV resize - using original %dx%d", width, height);
-        }
-        
-        // Step 2: Convert YUV to RGB using platform-specific converter
-        LOGF("Step 2: Converting YUV to RGB using platform-specific converter...");
-        
-        std::vector<uint8_t> rgbData;
-        if (yuvConverter) {
-            LOGF("Using platform-specific YUV converter (Android/iOS optimized)");
-            size_t processFrameSize = resizedYuvData.empty() ? frameSize : resizedYuvData.size();
-            rgbData = yuvConverter->convertYuvToRgb(processFrameData, processFrameSize, 
-                                                   processWidth, processHeight);
-        } else {
-            LOGF("ERROR: Platform-specific YUV converter not available - cannot proceed");
-            LOGF("Legacy YUV conversion has been deprecated due to stride/format issues");
-            return {};
-        }
-        
-        if (rgbData.empty()) {
-            LOGF("ERROR: YUV to RGB conversion failed");
-            return {};
-        }
-        
-        // DEBUG: Save RGB data after YUV conversion
-        if (enableDebugImages) {
-            LOGF("DEBUG: Saving RGB data after YUV conversion (%dx%d)", processWidth, processHeight);
-            UniversalScanner::ImageDebugger::saveRGB("1_rgb_converted.jpg", rgbData, processWidth, processHeight);
-        }
-        
-        // Step 3: Apply 90° CW rotation if needed
-        size_t frameWidth = processWidth;
-        size_t frameHeight = processHeight;
-        
-        // Apply 90° CW rotation to fix orientation from emulator  
-        LOGF("Step 3: Applying 90° CW rotation to fix orientation (%zux%zu)", frameWidth, frameHeight);
-        rgbData = UniversalScanner::ImageRotation::rotate90CW(rgbData, frameWidth, frameHeight);
-        // Dimensions are swapped for 90° rotation
-        std::swap(frameWidth, frameHeight);
-        
-        // DEBUG: Save RGB data after rotation
-        if (enableDebugImages) {
-            LOGF("DEBUG: Saving RGB data after 90° CW rotation (%zux%zu)", frameWidth, frameHeight);
-            UniversalScanner::ImageDebugger::saveRGB("2_rotated.jpg", rgbData, frameWidth, frameHeight);
-        }
-        
-        // Step 4: Apply white padding to make it square 640x640
-        LOGF("Step 4: Applying white padding to %zux%zu -> 640x640", frameWidth, frameHeight);
-        UniversalScanner::PaddingInfo padInfo;
-        std::vector<float> inputTensor = UniversalScanner::WhitePadding::applyPadding(
-            rgbData, frameWidth, frameHeight, 640, &padInfo
-        );
-        
-        if (inputTensor.empty()) {
-            LOGF("ERROR: White padding failed");
-            return {};
-        }
-        
-        // DEBUG: Save padded tensor data
-        if (enableDebugImages) {
-            LOGF("DEBUG: Saving padded tensor data (640x640)");
-            UniversalScanner::ImageDebugger::saveTensor("3_padded.jpg", inputTensor, 640, 640);
-        }
-        
-        LOGF("Real frame preprocessing completed - padded to 640x640, first few pixels: %.3f %.3f %.3f", 
-             inputTensor[0], inputTensor[1], inputTensor[2]);
-        
-        // Create input tensor
-        auto inputTensorOrt = Ort::Value::CreateTensor<float>(
-            memoryInfo,
-            inputTensor.data(),
-            inputTensor.size(),
-            modelInfo.inputShape.data(),
-            modelInfo.inputShape.size()
-        );
-        
-        // Run inference
-        const char* inputNames[] = {modelInfo.inputName.c_str()};
-        const char* outputNames[] = {modelInfo.outputName.c_str()};
-        
-        auto outputTensors = session->Run(
-            Ort::RunOptions{nullptr},
-            inputNames,
-            &inputTensorOrt,
-            1,
-            outputNames,
-            1
-        );
-        
-        // Get output data and structure it properly like OnnxPlugin.cpp
-        auto& outputTensor = outputTensors[0];
-        float* outputData = outputTensor.GetTensorMutableData<float>();
-        auto outputShape = outputTensor.GetTensorTypeAndShapeInfo().GetShape();
-        
-        LOGF("ONNX inference completed, output shape: [%ld, %ld, %ld]", 
-             (long)outputShape[0], (long)outputShape[1], (long)outputShape[2]);
-        
-        // Copy raw output to vector for processing
-        size_t outputSize = 1;
-        for (auto dim : outputShape) {
-            outputSize *= dim;
-        }
-        std::vector<float> output(outputData, outputData + outputSize);
-        
-        // Following OnnxPlugin.cpp approach: YOLOv8n model outputs [1, 9, 8400]
-        // Create proper nested structure for processing like ONNX-RN format
-        const size_t batch = outputShape[0];      // 1
-        const size_t features = outputShape[1];   // 9 
-        const size_t anchors = outputShape[2];    // 8400
-        
-        LOGF("Processing ONNX output: batch=%zu, features=%zu, anchors=%zu", batch, features, anchors);
-        
-        // Helper function for sigmoid activation
-        auto sigmoid = [](float x) {
-            return 1.0f / (1.0f + std::exp(-x));
-        };
-        
-        // ASSERT expected tensor format - NO FALLBACKS
-        // Our unified-detection-v7.onnx model MUST output [1, 9, 8400] format
-        if (outputShape[1] != 9 || outputShape[2] != 8400) {
-            LOGF("ERROR: Model output shape [%ld, %ld, %ld] does not match expected [1, 9, 8400]", 
-                 (long)outputShape[0], (long)outputShape[1], (long)outputShape[2]);
-            LOGF("This indicates the wrong model or incorrect export format");
-            return {}; // FAIL LOUDLY - NO GUESSING
-        }
-        
-        LOGF("Model output format validated: [1, 9, 8400] (features-major)");
-        
-        // Direct indexing for [1, 9, 8400] format: feature * anchors + anchor
-        auto getVal = [&](size_t anchorIdx, size_t featureIdx) -> float {
-            return output[featureIdx * anchors + anchorIdx];
-        };
-        
-        // Find the best anchor - only extract coordinates for the winner
-        size_t bestAnchor = 0;
-        float bestConfidence = 0.0f;
-        int bestClass = -1;
-        
-        for (size_t a = 0; a < anchors; a++) {
-            // This model has NO objectness score! Just 5 class scores directly
-            // Features 4-8: 5 class probabilities 
-            float maxClassProb = 0.0f;
-            int classIdx = -1;
-            for (int c = 0; c < 5; c++) {  // 5 classes: features 4-8
-                float classProb_raw = getVal(a, 4 + c);
-                float classProb = sigmoid(classProb_raw);
-                if (classProb > maxClassProb) {
-                    maxClassProb = classProb;
-                    classIdx = c;
-                }
-            }
-            
-            // No objectness - just use class probability directly
-            float confidence = maxClassProb;
-            
-            if (confidence > bestConfidence && confidence > 0.55f) {
-                bestConfidence = confidence;
-                bestAnchor = a;       // Remember which anchor won
-                bestClass = classIdx;
-            }
-        }
-        
-        // Extract coordinates only for the winning anchor
-        float bestX = 0.0f, bestY = 0.0f, bestW = 0.0f, bestH = 0.0f;
-        if (bestConfidence > 0.0f) {
-            bestX = getVal(bestAnchor, 0);  // Center X
-            bestY = getVal(bestAnchor, 1);  // Center Y  
-            bestW = getVal(bestAnchor, 2);  // Width
-            bestH = getVal(bestAnchor, 3);  // Height
-        }
-        
-        LOGF("Best detection: class=%d, conf=%.3f", bestClass, bestConfidence);
-        
-        // Create structured result
-        DetectionResult result;
-        if (bestConfidence > 0.0f) {
-            // Populate detection result with normalized coordinates [0,1]
-            result.confidence = bestConfidence;
-            result.centerX = bestX / 640.0f;      // Normalize to [0,1]
-            result.centerY = bestY / 640.0f;      // Normalize to [0,1]
-            result.width = bestW / 640.0f;        // Normalize to [0,1]
-            result.height = bestH / 640.0f;       // Normalize to [0,1]
-            result.classIndex = bestClass;
-            
-            LOGF("Returning normalized coords: x=%.3f, y=%.3f, w=%.3f, h=%.3f", 
-                 result.centerX, result.centerY, result.width, result.height);
-        } else {
-            // Default-constructed DetectionResult has confidence=0, indicating no detection
-            result = {};
-        }
-        return result;
+        // Run inference and return result
+        return runInference(inputTensor);
         
     } catch (const Ort::Exception& e) {
         LOGF("ONNX inference error: %s", e.what());
         return {}; // NO FALLBACK MOCKING
     }
+}
+
+// Helper method implementations
+
+bool OnnxProcessor::initializeConverters(JNIEnv* env, jobject context) {
+    // Initialize YUV converter if not already done
+    if (!yuvConverter && env) {
+        LOGF("Initializing platform-specific YUV converter...");
+        yuvConverter = YuvConverter::create(env, context);
+        if (!yuvConverter) {
+            LOGF("Failed to create YUV converter");
+            return false;
+        }
+    }
+    
+    // Initialize YUV resizer if not already done  
+    if (!yuvResizer && env) {
+        LOGF("Initializing platform-specific YUV resizer...");
+        yuvResizer = YuvResizer::create(env, context);
+        if (!yuvResizer) {
+            LOGF("Failed to create YUV resizer");
+            return false;
+        }
+    }
+    
+    return yuvConverter != nullptr;
+}
+
+std::vector<uint8_t> OnnxProcessor::preprocessFrame(const uint8_t* frameData, size_t frameSize, 
+                                                   int width, int height, int* outWidth, int* outHeight) {
+    if (!frameData || frameSize == 0) {
+        LOGF("ERROR: No real frame data provided");
+        return {};
+    }
+    
+    LOGF("Processing REAL camera frame data: %dx%d, %zu bytes", width, height, frameSize);
+    
+    // DEBUG: Save original YUV frame
+    if (enableDebugImages) {
+        size_t ySize = width * height;
+        size_t uvSize = ySize / 4;
+        const uint8_t* yPlane = frameData;
+        const uint8_t* uPlane = frameData + ySize;
+        const uint8_t* vPlane = frameData + ySize + uvSize;
+        UniversalScanner::ImageDebugger::saveYUV420("0_original_yuv.jpg", 
+            yPlane, uPlane, vPlane, width, height, width, width / 2);
+    }
+    
+    // Step 1: Resize YUV for performance optimization
+    int targetWidth, targetHeight;
+    if (width > height) {
+        targetWidth = 640;
+        targetHeight = (height * 640) / width;
+    } else {
+        targetHeight = 640;
+        targetWidth = (width * 640) / height;
+    }
+    
+    // Ensure even dimensions for YUV 4:2:0 format
+    targetWidth = targetWidth & 0xFFFE;
+    targetHeight = targetHeight & 0xFFFE;
+    
+    std::vector<uint8_t> resizedYuvData;
+    int processWidth = width;
+    int processHeight = height;
+    const uint8_t* processFrameData = frameData;
+    
+    if (yuvResizer && (targetWidth < width || targetHeight < height)) {
+        LOGF("Resizing YUV: %dx%d -> %dx%d", width, height, targetWidth, targetHeight);
+        resizedYuvData = yuvResizer->resizeYuv(frameData, frameSize, width, height, targetWidth, targetHeight);
+        
+        if (!resizedYuvData.empty()) {
+            processWidth = targetWidth;
+            processHeight = targetHeight;
+            processFrameData = resizedYuvData.data();
+            
+            // DEBUG: Save resized YUV frame
+            if (enableDebugImages) {
+                size_t resizedYSize = processWidth * processHeight;
+                size_t resizedUvSize = resizedYSize / 4;
+                const uint8_t* resizedYPlane = processFrameData;
+                const uint8_t* resizedUPlane = processFrameData + resizedYSize;
+                const uint8_t* resizedVPlane = processFrameData + resizedYSize + resizedUvSize;
+                UniversalScanner::ImageDebugger::saveYUV420("0b_resized_yuv.jpg", 
+                    resizedYPlane, resizedUPlane, resizedVPlane, 
+                    processWidth, processHeight, processWidth, processWidth / 2);
+            }
+        }
+    }
+    
+    // Step 2: Convert YUV to RGB
+    LOGF("Converting YUV to RGB (%dx%d)", processWidth, processHeight);
+    size_t processFrameSize = resizedYuvData.empty() ? frameSize : resizedYuvData.size();
+    auto rgbData = yuvConverter->convertYuvToRgb(processFrameData, processFrameSize, processWidth, processHeight);
+    
+    if (rgbData.empty()) {
+        LOGF("ERROR: YUV to RGB conversion failed");
+        return {};
+    }
+    
+    if (enableDebugImages) {
+        UniversalScanner::ImageDebugger::saveRGB("1_rgb_converted.jpg", rgbData, processWidth, processHeight);
+    }
+    
+    // Step 3: Apply 90° CW rotation
+    LOGF("Applying 90° CW rotation (%dx%d)", processWidth, processHeight);
+    rgbData = UniversalScanner::ImageRotation::rotate90CW(rgbData, processWidth, processHeight);
+    std::swap(processWidth, processHeight); // Dimensions swapped after rotation
+    
+    if (enableDebugImages) {
+        UniversalScanner::ImageDebugger::saveRGB("2_rotated.jpg", rgbData, processWidth, processHeight);
+    }
+    
+    *outWidth = processWidth;
+    *outHeight = processHeight;
+    return rgbData;
+}
+
+std::vector<float> OnnxProcessor::createTensorFromRGB(const std::vector<uint8_t>& rgbData, int width, int height) {
+    LOGF("Creating tensor from RGB data (%dx%d)", width, height);
+    
+    // Apply white padding to make it square 640x640
+    UniversalScanner::PaddingInfo padInfo;
+    auto inputTensor = UniversalScanner::WhitePadding::applyPadding(rgbData, width, height, 640, &padInfo);
+    
+    if (inputTensor.empty()) {
+        LOGF("ERROR: White padding failed");
+        return {};
+    }
+    
+    if (enableDebugImages) {
+        UniversalScanner::ImageDebugger::saveTensor("3_padded.jpg", inputTensor, 640, 640);
+    }
+    
+    LOGF("Tensor created: 640x640, first pixels: %.3f %.3f %.3f", 
+         inputTensor[0], inputTensor[1], inputTensor[2]);
+    
+    return inputTensor;
+}
+
+DetectionResult OnnxProcessor::runInference(const std::vector<float>& inputTensor) {
+    LOGF("Running ONNX inference");
+    
+    // Create input tensor
+    auto inputTensorOrt = Ort::Value::CreateTensor<float>(
+        memoryInfo, const_cast<float*>(inputTensor.data()), inputTensor.size(),
+        modelInfo.inputShape.data(), modelInfo.inputShape.size()
+    );
+    
+    // Run inference
+    const char* inputNames[] = {modelInfo.inputName.c_str()};
+    const char* outputNames[] = {modelInfo.outputName.c_str()};
+    
+    auto outputTensors = session->Run(Ort::RunOptions{nullptr}, inputNames, &inputTensorOrt, 1, outputNames, 1);
+    
+    // Extract output data
+    auto& outputTensor = outputTensors[0];
+    float* outputData = outputTensor.GetTensorMutableData<float>();
+    auto outputShape = outputTensor.GetTensorTypeAndShapeInfo().GetShape();
+    
+    LOGF("ONNX inference completed, output shape: [%ld, %ld, %ld]", 
+         (long)outputShape[0], (long)outputShape[1], (long)outputShape[2]);
+    
+    // Copy to vector for processing
+    size_t outputSize = 1;
+    for (auto dim : outputShape) outputSize *= dim;
+    std::vector<float> output(outputData, outputData + outputSize);
+    
+    return findBestDetection(output);
+}
+
+DetectionResult OnnxProcessor::findBestDetection(const std::vector<float>& modelOutput) {
+    // Validate output format [1, 9, 8400]
+    const size_t expectedFeatures = 9;
+    const size_t expectedAnchors = 8400;
+    
+    if (modelOutput.size() != expectedFeatures * expectedAnchors) {
+        LOGF("ERROR: Unexpected output size %zu, expected %zu", modelOutput.size(), expectedFeatures * expectedAnchors);
+        return {};
+    }
+    
+    LOGF("Processing %zu anchors for best detection", expectedAnchors);
+    
+    auto sigmoid = [](float x) { return 1.0f / (1.0f + std::exp(-x)); };
+    auto getVal = [&](size_t anchorIdx, size_t featureIdx) -> float {
+        return modelOutput[featureIdx * expectedAnchors + anchorIdx];
+    };
+    
+    // Find best anchor
+    size_t bestAnchor = 0;
+    float bestConfidence = 0.0f;
+    int bestClass = -1;
+    
+    for (size_t a = 0; a < expectedAnchors; a++) {
+        // Find best class for this anchor (features 4-8: 5 classes)
+        float maxClassProb = 0.0f;
+        int classIdx = -1;
+        for (int c = 0; c < 5; c++) {
+            float classProb = sigmoid(getVal(a, 4 + c));
+            if (classProb > maxClassProb) {
+                maxClassProb = classProb;
+                classIdx = c;
+            }
+        }
+        
+        if (maxClassProb > bestConfidence && maxClassProb > 0.55f) {
+            bestConfidence = maxClassProb;
+            bestAnchor = a;
+            bestClass = classIdx;
+        }
+    }
+    
+    // Create result
+    DetectionResult result;
+    if (bestConfidence > 0.0f) {
+        result.confidence = bestConfidence;
+        result.centerX = getVal(bestAnchor, 0) / 640.0f;    // Normalize to [0,1]
+        result.centerY = getVal(bestAnchor, 1) / 640.0f;    // Normalize to [0,1]
+        result.width = getVal(bestAnchor, 2) / 640.0f;      // Normalize to [0,1]
+        result.height = getVal(bestAnchor, 3) / 640.0f;     // Normalize to [0,1]
+        result.classIndex = bestClass;
+        
+        LOGF("Best detection: class=%d, conf=%.3f, coords=(%.3f,%.3f) size=%.3fx%.3f", 
+             result.classIndex, result.confidence, result.centerX, result.centerY, result.width, result.height);
+    }
+    
+    return result;
 }
 
 } // namespace UniversalScanner
