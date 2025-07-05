@@ -36,6 +36,9 @@ private:
     // Platform-specific YUV converter and resizer
     std::unique_ptr<YuvConverter> yuvConverter;
     std::unique_ptr<IYuvResizer> yuvResizer;
+    
+    // Debug image logging control
+    bool enableDebugImages;
 
     bool initializeModel();
 
@@ -46,6 +49,9 @@ public:
     // Main processing function
     std::vector<float> processFrame(int width, int height, JNIEnv* env, jobject context, 
                                    const uint8_t* frameData, size_t frameSize);
+    
+    // Debug image control
+    void setDebugImages(bool enabled) { enableDebugImages = enabled; }
 };
 
 } // namespace UniversalScanner

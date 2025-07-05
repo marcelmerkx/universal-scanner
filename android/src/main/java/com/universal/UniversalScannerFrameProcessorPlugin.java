@@ -87,6 +87,13 @@ public class UniversalScannerFrameProcessorPlugin extends FrameProcessorPlugin {
                 Log.i(TAG, "Processing frame: " + width + "x" + height);
                 Log.i(TAG, "Calling nativeProcessFrameWithData with real Frame object");
                 
+                // Handle debug images argument
+                if (arguments != null && arguments.containsKey("debugImages")) {
+                    boolean debugImages = (Boolean) arguments.get("debugImages");
+                    nativeModule.setDebugImages(debugImages);
+                    Log.i(TAG, "Debug images " + (debugImages ? "enabled" : "disabled"));
+                }
+                
                 // Extract actual frame data from VisionCamera Image
                 android.media.Image.Plane[] planes = image.getPlanes();
                 

@@ -30,4 +30,6 @@ public class UniversalNativeModule {
     
     public native String nativeProcessFrameWithData(int width, int height, byte[] frameData);
     
+    public native void setDebugImages(boolean enabled);
+    
 }

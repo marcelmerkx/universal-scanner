@@ -17,6 +17,11 @@ export interface ScannerConfig {
    * Enable verbose logging
    */
   verbose?: boolean
+  /**
+   * Enable debug image saving to device storage
+   * WARNING: Will fill up storage quickly due to timestamped images
+   */
+  debugImages?: boolean
 }
 
 export interface ScanResult {

@@ -579,6 +579,7 @@ public:
         registerHybrid({
             makeNativeMethod("initHybrid", UniversalNativeModule::initHybrid),
             makeNativeMethod("nativeProcessFrameWithData", UniversalNativeModule::nativeProcessFrameWithData),
+            makeNativeMethod("setDebugImages", UniversalNativeModule::setDebugImages),
         });
     }
     
@@ -648,6 +649,18 @@ public:
             LOGF("Error in nativeProcessFrameWithData: %s", e.what());
             return make_jstring("{\"error\":\"" + std::string(e.what()) + "\"}");
         }
+    }
+    
+    // Control debug image saving
+    void setDebugImages(bool enabled) {
+        LOGF("setDebugImages called: %s", enabled ? "enabled" : "disabled");
+        
+        // Initialize processor if needed
+        if (!g_onnxProcessor) {
+            g_onnxProcessor = std::make_unique<UniversalScanner::OnnxProcessor>();
+        }
+        
+        g_onnxProcessor->setDebugImages(enabled);
     }
 };
 

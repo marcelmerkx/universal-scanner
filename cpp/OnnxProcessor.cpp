@@ -9,8 +9,17 @@ extern const char* getClassName(int classIdx);
 namespace UniversalScanner {
 
 OnnxProcessor::OnnxProcessor() 
-    : memoryInfo(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)), modelLoaded(false), yuvConverter(nullptr) {
+    : memoryInfo(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)), modelLoaded(false), yuvConverter(nullptr), enableDebugImages(false) {
     LOGF("OnnxProcessor created");
+    
+    // Enable debug images by default in DEBUG builds, disable in release
+    #ifdef DEBUG
+        enableDebugImages = true;
+        LOGF("Debug images enabled (DEBUG build)");
+    #else
+        enableDebugImages = false;
+        LOGF("Debug images disabled (RELEASE build)");
+    #endif
     
     // Initialize model info for unified-detection-v7.onnx
     modelInfo.inputShape = {1, 3, 640, 640}; // NCHW format
@@ -134,14 +143,16 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
         LOGF("Processing REAL camera frame data: %zu bytes", frameSize);
         
         // DEBUG: Save original YUV frame to compare with RGB conversion
-        LOGF("DEBUG: Saving original YUV frame for comparison (%dx%d)", width, height);
-        size_t ySize = width * height;
-        size_t uvSize = ySize / 4;
-        const uint8_t* yPlane = frameData;
-        const uint8_t* uPlane = frameData + ySize;
-        const uint8_t* vPlane = frameData + ySize + uvSize;
-        UniversalScanner::ImageDebugger::saveYUV420("0_original_yuv.jpg", 
-            yPlane, uPlane, vPlane, width, height, width, width / 2);
+        if (enableDebugImages) {
+            LOGF("DEBUG: Saving original YUV frame for comparison (%dx%d)", width, height);
+            size_t ySize = width * height;
+            size_t uvSize = ySize / 4;
+            const uint8_t* yPlane = frameData;
+            const uint8_t* uPlane = frameData + ySize;
+            const uint8_t* vPlane = frameData + ySize + uvSize;
+            UniversalScanner::ImageDebugger::saveYUV420("0_original_yuv.jpg", 
+                yPlane, uPlane, vPlane, width, height, width, width / 2);
+        }
         
         // Step 1: Resize YUV for performance optimization
         LOGF("Step 1: Resizing YUV from %dx%d to optimize processing...", width, height);
@@ -181,14 +192,16 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
                 LOGF("YUV resize successful - processing %dx%d frame", processWidth, processHeight);
                 
                 // DEBUG: Save resized YUV frame
-                size_t resizedYSize = processWidth * processHeight;
-                size_t resizedUvSize = resizedYSize / 4;
-                const uint8_t* resizedYPlane = processFrameData;
-                const uint8_t* resizedUPlane = processFrameData + resizedYSize;
-                const uint8_t* resizedVPlane = processFrameData + resizedYSize + resizedUvSize;
-                UniversalScanner::ImageDebugger::saveYUV420("0b_resized_yuv.jpg", 
-                    resizedYPlane, resizedUPlane, resizedVPlane, 
-                    processWidth, processHeight, processWidth, processWidth / 2);
+                if (enableDebugImages) {
+                    size_t resizedYSize = processWidth * processHeight;
+                    size_t resizedUvSize = resizedYSize / 4;
+                    const uint8_t* resizedYPlane = processFrameData;
+                    const uint8_t* resizedUPlane = processFrameData + resizedYSize;
+                    const uint8_t* resizedVPlane = processFrameData + resizedYSize + resizedUvSize;
+                    UniversalScanner::ImageDebugger::saveYUV420("0b_resized_yuv.jpg", 
+                        resizedYPlane, resizedUPlane, resizedVPlane, 
+                        processWidth, processHeight, processWidth, processWidth / 2);
+                }
             } else {
                 LOGF("YUV resize failed - using original dimensions");
             }
@@ -219,8 +232,10 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
         }
         
         // DEBUG: Save RGB data after YUV conversion
-        LOGF("DEBUG: Saving RGB data after YUV conversion (%dx%d)", processWidth, processHeight);
-        UniversalScanner::ImageDebugger::saveRGB("1_rgb_converted.jpg", rgbData, processWidth, processHeight);
+        if (enableDebugImages) {
+            LOGF("DEBUG: Saving RGB data after YUV conversion (%dx%d)", processWidth, processHeight);
+            UniversalScanner::ImageDebugger::saveRGB("1_rgb_converted.jpg", rgbData, processWidth, processHeight);
+        }
         
         // Step 3: Apply 90° CW rotation if needed
         size_t frameWidth = processWidth;
@@ -233,8 +248,10 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
         std::swap(frameWidth, frameHeight);
         
         // DEBUG: Save RGB data after rotation
-        LOGF("DEBUG: Saving RGB data after 90° CW rotation (%zux%zu)", frameWidth, frameHeight);
-        UniversalScanner::ImageDebugger::saveRGB("2_rotated.jpg", rgbData, frameWidth, frameHeight);
+        if (enableDebugImages) {
+            LOGF("DEBUG: Saving RGB data after 90° CW rotation (%zux%zu)", frameWidth, frameHeight);
+            UniversalScanner::ImageDebugger::saveRGB("2_rotated.jpg", rgbData, frameWidth, frameHeight);
+        }
         
         // Step 4: Apply white padding to make it square 640x640
         LOGF("Step 4: Applying white padding to %zux%zu -> 640x640", frameWidth, frameHeight);
@@ -250,8 +267,10 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
         }
         
         // DEBUG: Save padded tensor data
-        LOGF("DEBUG: Saving padded tensor data (640x640)");
-        UniversalScanner::ImageDebugger::saveTensor("3_padded.jpg", inputTensor, 640, 640);
+        if (enableDebugImages) {
+            LOGF("DEBUG: Saving padded tensor data (640x640)");
+            UniversalScanner::ImageDebugger::saveTensor("3_padded.jpg", inputTensor, 640, 640);
+        }
         
         LOGF("Real frame preprocessing completed - padded to 640x640, first few pixels: %.3f %.3f %.3f", 
              inputTensor[0], inputTensor[1], inputTensor[2]);
