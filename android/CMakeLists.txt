@@ -96,6 +96,9 @@ add_library(
   SHARED
   ../cpp/Universal.cpp
   ../cpp/OnnxProcessor.cpp
+  ../cpp/platform/YuvConverter.cpp
+  ../cpp/platform/AndroidYuvConverter.cpp
+  ../cpp/platform/AndroidYuvResizer.cpp
   ../cpp/preprocessing/FrameConverter.cpp
   ../cpp/preprocessing/ImageRotation.cpp
   ../cpp/preprocessing/WhitePadding.cpp

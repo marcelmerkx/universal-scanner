@@ -14,6 +14,8 @@
 #include "preprocessing/ImageRotation.h"
 #include "preprocessing/WhitePadding.h"
 #include "preprocessing/ImageDebugger.h"
+#include "platform/YuvConverter.h"
+#include "platform/YuvResizer.h"
 
 namespace UniversalScanner {
 
@@ -30,6 +32,10 @@ private:
         std::string inputName;
         std::string outputName;
     } modelInfo;
+
+    // Platform-specific YUV converter and resizer
+    std::unique_ptr<YuvConverter> yuvConverter;
+    std::unique_ptr<IYuvResizer> yuvResizer;
 
     bool initializeModel();
 

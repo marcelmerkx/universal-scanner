@@ -9,7 +9,7 @@ extern const char* getClassName(int classIdx);
 namespace UniversalScanner {
 
 OnnxProcessor::OnnxProcessor() 
-    : memoryInfo(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)), modelLoaded(false) {
+    : memoryInfo(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)), modelLoaded(false), yuvConverter(nullptr) {
     LOGF("OnnxProcessor created");
     
     // Initialize model info for unified-detection-v7.onnx
@@ -98,6 +98,23 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
         }
     }
     
+    // Initialize YUV converter and resizer if not already done
+    if (!yuvConverter && env) {
+        LOGF("Initializing platform-specific YUV converter...");
+        yuvConverter = YuvConverter::create(env, context);
+        if (!yuvConverter) {
+            LOGF("Failed to create YUV converter");
+        }
+    }
+    
+    if (!yuvResizer && env) {
+        LOGF("Initializing platform-specific YUV resizer...");
+        yuvResizer = YuvResizer::create(env, context);
+        if (!yuvResizer) {
+            LOGF("Failed to create YUV resizer");
+        }
+    }
+    
     if (!modelLoaded || !session) {
         LOGF("Model not loaded!");
         std::vector<float> empty;
@@ -116,35 +133,85 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
         
         LOGF("Processing REAL camera frame data: %zu bytes", frameSize);
         
-        // Step 1: Convert YUV byte array to RGB directly
-        LOGF("Step 1: Converting YUV to RGB from real camera data...");
-        
-        // Calculate YUV plane sizes for YUV_420_888 format
+        // DEBUG: Save original YUV frame to compare with RGB conversion
+        LOGF("DEBUG: Saving original YUV frame for comparison (%dx%d)", width, height);
         size_t ySize = width * height;
         size_t uvSize = ySize / 4;
-        size_t expectedSize = ySize + uvSize * 2; // Y + U + V
+        const uint8_t* yPlane = frameData;
+        const uint8_t* uPlane = frameData + ySize;
+        const uint8_t* vPlane = frameData + ySize + uvSize;
+        UniversalScanner::ImageDebugger::saveYUV420("0_original_yuv.jpg", 
+            yPlane, uPlane, vPlane, width, height, width, width / 2);
         
-        if (frameSize < expectedSize) {
-            LOGF("ERROR: Frame size %zu is smaller than expected %zu for %dx%d YUV_420_888", 
-                 frameSize, expectedSize, width, height);
+        // Step 1: Resize YUV for performance optimization
+        LOGF("Step 1: Resizing YUV from %dx%d to optimize processing...", width, height);
+        
+        // Calculate target size - aim for ~640 pixels on longer dimension
+        int targetWidth, targetHeight;
+        if (width > height) {
+            targetWidth = 640;
+            targetHeight = (height * 640) / width;
+        } else {
+            targetHeight = 640;
+            targetWidth = (width * 640) / height;
+        }
+        
+        // Ensure even dimensions for YUV 4:2:0 format
+        targetWidth = targetWidth & 0xFFFE;
+        targetHeight = targetHeight & 0xFFFE;
+        
+        std::vector<uint8_t> resizedYuvData;
+        int processWidth = width;
+        int processHeight = height;
+        const uint8_t* processFrameData = frameData;
+        
+        if (yuvResizer && (targetWidth < width || targetHeight < height)) {
+            LOGF("Resizing YUV: %dx%d -> %dx%d (%.1fx reduction)", 
+                 width, height, targetWidth, targetHeight, 
+                 float(width * height) / float(targetWidth * targetHeight));
+            
+            resizedYuvData = yuvResizer->resizeYuv(frameData, frameSize, 
+                                                  width, height, 
+                                                  targetWidth, targetHeight);
+            
+            if (!resizedYuvData.empty()) {
+                processWidth = targetWidth;
+                processHeight = targetHeight;
+                processFrameData = resizedYuvData.data();
+                LOGF("YUV resize successful - processing %dx%d frame", processWidth, processHeight);
+                
+                // DEBUG: Save resized YUV frame
+                size_t resizedYSize = processWidth * processHeight;
+                size_t resizedUvSize = resizedYSize / 4;
+                const uint8_t* resizedYPlane = processFrameData;
+                const uint8_t* resizedUPlane = processFrameData + resizedYSize;
+                const uint8_t* resizedVPlane = processFrameData + resizedYSize + resizedUvSize;
+                UniversalScanner::ImageDebugger::saveYUV420("0b_resized_yuv.jpg", 
+                    resizedYPlane, resizedUPlane, resizedVPlane, 
+                    processWidth, processHeight, processWidth, processWidth / 2);
+            } else {
+                LOGF("YUV resize failed - using original dimensions");
+            }
+        } else {
+            LOGF("Skipping YUV resize - using original %dx%d", width, height);
+        }
+        
+        // Step 2: Convert YUV to RGB using platform-specific converter
+        LOGF("Step 2: Converting YUV to RGB using platform-specific converter...");
+        
+        std::vector<uint8_t> rgbData;
+        if (yuvConverter) {
+            LOGF("Using platform-specific YUV converter (Android/iOS optimized)");
+            size_t processFrameSize = resizedYuvData.empty() ? frameSize : resizedYuvData.size();
+            rgbData = yuvConverter->convertYuvToRgb(processFrameData, processFrameSize, 
+                                                   processWidth, processHeight);
+        } else {
+            LOGF("ERROR: Platform-specific YUV converter not available - cannot proceed");
+            LOGF("Legacy YUV conversion has been deprecated due to stride/format issues");
             std::vector<float> empty;
             return empty;
         }
         
-        // YUV_420_888 layout: Y plane, then U/V planes
-        const uint8_t* yPlane = frameData;
-        const uint8_t* uPlane = frameData + ySize;
-        const uint8_t* vPlane = frameData + ySize + uvSize;
-        
-        // DEBUG: Save raw YUV frame before any processing
-        LOGF("DEBUG: Saving raw YUV frame (%dx%d)", width, height);
-        UniversalScanner::ImageDebugger::saveYUV420("0_raw_yuv.jpg", 
-            yPlane, uPlane, vPlane, width, height, width, width / 2);
-        
-        // Convert YUV planes to RGB
-        std::vector<uint8_t> rgbData = UniversalScanner::FrameConverter::convertI420toRGB(
-            yPlane, uPlane, vPlane, width, height, width, width / 2
-        );
         if (rgbData.empty()) {
             LOGF("ERROR: YUV to RGB conversion failed");
             std::vector<float> empty;
@@ -152,25 +219,25 @@ std::vector<float> OnnxProcessor::processFrame(int width, int height, JNIEnv* en
         }
         
         // DEBUG: Save RGB data after YUV conversion
-        LOGF("DEBUG: Saving RGB data after YUV conversion (%dx%d)", width, height);
-        UniversalScanner::ImageDebugger::saveRGB("1_rgb_converted.jpg", rgbData, width, height);
+        LOGF("DEBUG: Saving RGB data after YUV conversion (%dx%d)", processWidth, processHeight);
+        UniversalScanner::ImageDebugger::saveRGB("1_rgb_converted.jpg", rgbData, processWidth, processHeight);
         
-        // Step 2: Apply 90° CW rotation if needed (640x480 -> 480x640)
-        size_t frameWidth = width;
-        size_t frameHeight = height;
+        // Step 3: Apply 90° CW rotation if needed
+        size_t frameWidth = processWidth;
+        size_t frameHeight = processHeight;
         
         // Apply 90° CW rotation to fix orientation from emulator  
-        LOGF("Step 2: Applying 90° CW rotation to fix orientation (%zux%zu)", frameWidth, frameHeight);
+        LOGF("Step 3: Applying 90° CW rotation to fix orientation (%zux%zu)", frameWidth, frameHeight);
         rgbData = UniversalScanner::ImageRotation::rotate90CW(rgbData, frameWidth, frameHeight);
         // Dimensions are swapped for 90° rotation
-        std::swap(frameWidth, frameHeight); // 640x480 -> 480x640
+        std::swap(frameWidth, frameHeight);
         
         // DEBUG: Save RGB data after rotation
         LOGF("DEBUG: Saving RGB data after 90° CW rotation (%zux%zu)", frameWidth, frameHeight);
         UniversalScanner::ImageDebugger::saveRGB("2_rotated.jpg", rgbData, frameWidth, frameHeight);
         
-        // Step 3: Apply white padding to make it square 640x640
-        LOGF("Step 3: Applying white padding to %zux%zu -> 640x640", frameWidth, frameHeight);
+        // Step 4: Apply white padding to make it square 640x640
+        LOGF("Step 4: Applying white padding to %zux%zu -> 640x640", frameWidth, frameHeight);
         UniversalScanner::PaddingInfo padInfo;
         std::vector<float> inputTensor = UniversalScanner::WhitePadding::applyPadding(
             rgbData, frameWidth, frameHeight, 640, &padInfo

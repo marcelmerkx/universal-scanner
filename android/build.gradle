@@ -8,6 +8,7 @@ buildscript {
 
   dependencies {
     classpath "com.android.tools.build:gradle:7.2.2"
+    classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.10"
   }
 }
 
@@ -16,6 +17,7 @@ def isNewArchitectureEnabled() {
 }
 
 apply plugin: "com.android.library"
+apply plugin: "kotlin-android"
 
 
 def appProject = rootProject.allprojects.find { it.plugins.hasPlugin('com.android.application') }
@@ -104,8 +106,12 @@ android {
   }
 
   compileOptions {
-    sourceCompatibility JavaVersion.VERSION_1_8
-    targetCompatibility JavaVersion.VERSION_1_8
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = "17"
   }
 
   configurations {
@@ -143,6 +149,9 @@ dependencies {
   implementation "com.microsoft.onnxruntime:onnxruntime-android:1.17.3"
   extractSO("com.microsoft.onnxruntime:onnxruntime-android:1.17.3")
   extractHeaders("com.microsoft.onnxruntime:onnxruntime-android:1.17.3")
+  
+  // Kotlin standard library
+  implementation "org.jetbrains.kotlin:kotlin-stdlib:1.8.10"
 }
 
 task extractAARHeaders {
