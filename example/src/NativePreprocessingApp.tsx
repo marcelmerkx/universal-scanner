@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { StyleSheet, View, Text, ActivityIndicator, ScrollView, Dimensions } from 'react-native'
+import { StyleSheet, View, Text, ActivityIndicator, ScrollView, Dimensions, TouchableOpacity } from 'react-native'
 import {
   Camera,
   useCameraDevice,
@@ -17,6 +17,7 @@ export default function NativePreprocessingApp(): React.ReactNode {
   const device = useCameraDevice('back')
   const [lastResult, setLastResult] = React.useState<any>(null)
   const [fps, setFps] = React.useState(0)
+  const [debugImages, setDebugImages] = React.useState(false)
   const screenDimensions = Dimensions.get('window')
   
   // Find EXACT 1280x720 format that our coordinate transformation expects
@@ -112,6 +113,7 @@ export default function NativePreprocessingApp(): React.ReactNode {
         const result = universalScanner.call(frame, {
           enabledTypes: ['code_qr_barcode', 'code_container_h', 'code_container_v', 'code_license_plate'],
           verbose: true,
+          debugImages: debugImages,
         })
         
         if (result) {
@@ -312,6 +314,14 @@ export default function NativePreprocessingApp(): React.ReactNode {
             <Text style={styles.subtitle}>
               Real-time license plate detection with bounding boxes
             </Text>
+            <TouchableOpacity 
+              style={styles.debugButton} 
+              onPress={() => setDebugImages(!debugImages)}
+            >
+              <Text style={styles.debugButtonText}>
+                Debug Images: {debugImages ? 'ON' : 'OFF'}
+              </Text>
+            </TouchableOpacity>
             {renderResult()}
           </View>
           
@@ -446,6 +456,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'white',
     marginTop: 1,
+  },
+  debugButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginBottom: 10,
+    alignSelf: 'center',
+  },
+  debugButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: 'bold',
   },
   detectionConfidence: {
     fontSize: 12,
