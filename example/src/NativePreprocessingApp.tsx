@@ -197,60 +197,50 @@ export default function NativePreprocessingApp(): React.ReactNode {
           
           console.log(`Unpadded center: (${unpaddedCenterX.toFixed(1)},${unpaddedCenterY.toFixed(1)}) -> top-left: (${unpaddedX.toFixed(1)},${unpaddedY.toFixed(1)}) size=${unpaddedW.toFixed(1)}×${unpaddedH.toFixed(1)}`)
           
-          // Step 3: Calculate screen crop (resizeMode="cover")
-          // VisionCamera scales the rotated camera to cover the screen
+          // Step 3: Calculate screen scaling (resizeMode="contain") 
+          // VisionCamera scales the rotated camera to fit within screen (no cropping)
           const screenAspect = screenDimensions.width / screenDimensions.height
           const rotatedCameraAspect = rotatedCameraWidth / rotatedCameraHeight
           
-          let visibleWidthFraction = 1, visibleHeightFraction = 1
-          let cropOffsetX = 0, cropOffsetY = 0
+          let displayScale, displayOffsetX = 0, displayOffsetY = 0
+          let displayWidth, displayHeight
           
           if (screenAspect > rotatedCameraAspect) {
-            // Screen is wider - crop top/bottom
-            const scale = screenDimensions.width / rotatedCameraWidth
-            const scaledHeight = rotatedCameraHeight * scale
-            visibleHeightFraction = screenDimensions.height / scaledHeight
-            cropOffsetY = (1 - visibleHeightFraction) / 2
+            // Screen is wider - camera fits height, add padding on sides
+            displayScale = screenDimensions.height / rotatedCameraHeight
+            displayWidth = rotatedCameraWidth * displayScale
+            displayHeight = screenDimensions.height
+            displayOffsetX = (screenDimensions.width - displayWidth) / 2
+            displayOffsetY = 0
           } else {
-            // Screen is taller - crop left/right
-            const scale = screenDimensions.height / rotatedCameraHeight
-            const scaledWidth = rotatedCameraWidth * scale
-            visibleWidthFraction = screenDimensions.width / scaledWidth
-            cropOffsetX = (1 - visibleWidthFraction) / 2
+            // Screen is taller - camera fits width, add padding top/bottom  
+            displayScale = screenDimensions.width / rotatedCameraWidth
+            displayWidth = screenDimensions.width
+            displayHeight = rotatedCameraHeight * displayScale
+            displayOffsetX = 0
+            displayOffsetY = (screenDimensions.height - displayHeight) / 2
           }
           
-          console.log(`Screen crop: visibleWidth=${(visibleWidthFraction*100).toFixed(1)}%, visibleHeight=${(visibleHeightFraction*100).toFixed(1)}%`)
-          console.log(`Crop offsets: X=${(cropOffsetX*100).toFixed(1)}%, Y=${(cropOffsetY*100).toFixed(1)}%`)
+          console.log(`Contain mode: scale=${displayScale.toFixed(3)}, display=${displayWidth.toFixed(1)}x${displayHeight.toFixed(1)}`)
+          console.log(`Display offsets: X=${displayOffsetX.toFixed(1)}, Y=${displayOffsetY.toFixed(1)}`)
           
-          // Step 4: Map to screen coordinates if within visible bounds  
+          // Step 4: Map to screen coordinates (no cropping, just scaling + offset)
           // Use CENTER coordinates for proper mapping to screen space
           const normalizedX = unpaddedCenterX / rotatedCameraWidth
           const normalizedY = unpaddedCenterY / rotatedCameraHeight
           
-          const croppedX = (normalizedX - cropOffsetX) / visibleWidthFraction
-          const croppedY = (normalizedY - cropOffsetY) / visibleHeightFraction
-          
-          // Check if the detection is within the visible area
-          const isVisible = croppedX >= 0 && croppedX <= 1 && croppedY >= 0 && croppedY <= 1
-          
-          if (!isVisible) {
-            console.log(`Detection outside visible area: croppedX=${croppedX.toFixed(3)}, croppedY=${croppedY.toFixed(3)}`)
-            return null
-          }
-          
-          // croppedX,croppedY are the CENTER coordinates in normalized screen space
-          const screenCenterX = croppedX * screenDimensions.width
-          const screenCenterY = croppedY * screenDimensions.height
-          const screenW = (unpaddedW / rotatedCameraWidth / visibleWidthFraction) * screenDimensions.width
-          const screenH = (unpaddedH / rotatedCameraHeight / visibleHeightFraction) * screenDimensions.height
+          // Direct mapping - no cropping involved
+          const screenCenterX = normalizedX * displayWidth + displayOffsetX
+          const screenCenterY = normalizedY * displayHeight + displayOffsetY
+          const screenW = (unpaddedW / rotatedCameraWidth) * displayWidth
+          const screenH = (unpaddedH / rotatedCameraHeight) * displayHeight
           
           // Convert from center coordinates to top-left for React Native View
           const boxLeft = screenCenterX - screenW / 2
           const boxTop = screenCenterY - screenH / 2
           
-          console.log(`=== ROTATION-AWARE MAPPING ===`)
+          console.log(`=== CONTAIN MODE MAPPING ===`)
           console.log(`Normalized in camera: (${normalizedX.toFixed(3)},${normalizedY.toFixed(3)})`)
-          console.log(`After crop adjustment: (${croppedX.toFixed(3)},${croppedY.toFixed(3)})`)
           console.log(`Screen center: (${screenCenterX.toFixed(1)},${screenCenterY.toFixed(1)})`)
           console.log(`Final box: left=${boxLeft.toFixed(1)}, top=${boxTop.toFixed(1)}, size=${screenW.toFixed(1)}×${screenH.toFixed(1)}`)
           
@@ -314,7 +304,7 @@ export default function NativePreprocessingApp(): React.ReactNode {
             pixelFormat="yuv"
             enableFpsGraph={true}
             format={format}
-            resizeMode="cover"
+            resizeMode="contain"
           />
           <View style={styles.overlay}>
             <Text style={styles.fps}>FPS: {fps}</Text>
@@ -325,7 +315,7 @@ export default function NativePreprocessingApp(): React.ReactNode {
             {renderResult()}
           </View>
           
-          {/* Debug Grid Overlay */}
+          {/* Debug Grid Overlay
           <View style={styles.debugGrid} pointerEvents="none">
             {Array.from({ length: 11 }, (_, i) => (
               <View key={`h-${i}`} style={[styles.gridLineHorizontal, { top: `${i * 10}%` }]}>
@@ -337,7 +327,7 @@ export default function NativePreprocessingApp(): React.ReactNode {
                 <Text style={styles.gridLabelVertical}>{i * 10}%</Text>
               </View>
             ))}
-          </View>
+          </View> */}
 
           {/* Bounding Box Overlay */}
           {renderBoundingBoxes()}
@@ -427,7 +417,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+    backgroundColor: 'rgba(41, 230, 17, 0.09)',
     padding: 10,
     paddingBottom: 20,
     maxHeight: 120,
