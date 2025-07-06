@@ -11,6 +11,59 @@ import {
 import { ScannerResult, useOnnxModel } from 'react-native-fast-tflite'
 import { useResizePlugin } from 'vision-camera-resize-plugin'
 import { Worklets } from 'react-native-worklets-core'
+import { CODE_DETECTION_TYPES } from './CodeDetectionTypes'
+// import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated'
+
+// Type definitions for scanner results
+interface Detection {
+  type: string
+  confidence: number
+  x: number
+  y: number
+  width: number
+  height: number
+  model: string
+}
+
+interface DetectionResult {
+  detections?: Detection[]
+  error?: string
+}
+
+interface AnimatedBoundingBoxProps {
+  detection: Detection
+  boxLeft: number
+  boxTop: number
+  screenW: number
+  screenH: number
+  previousPosition?: { x: number; y: number; width: number; height: number }
+}
+
+const AnimatedBoundingBox: React.FC<AnimatedBoundingBoxProps> = ({ 
+  detection, 
+  boxLeft, 
+  boxTop, 
+  screenW, 
+  screenH, 
+  previousPosition 
+}) => {
+  // Simplified non-animated version for now
+  return (
+    <View style={[
+      styles.boundingBox,
+      {
+        left: Math.max(0, boxLeft),
+        top: Math.max(0, boxTop),
+        width: Math.max(20, screenW),
+        height: Math.max(20, screenH),
+      }
+    ]}>
+      <Text style={styles.boundingBoxLabel}>
+        {detection.type.replace('code_', '')}: {(Number(detection.confidence) * 100).toFixed(0)}%
+      </Text>
+    </View>
+  )
+}
 
 export default function NativePreprocessingApp(): React.ReactNode {
   const { hasPermission, requestPermission } = useCameraPermission()
@@ -19,6 +72,7 @@ export default function NativePreprocessingApp(): React.ReactNode {
   const [fps, setFps] = React.useState(0)
   const [debugImages, setDebugImages] = React.useState(false)
   const screenDimensions = Dimensions.get('window')
+  const [previousDetections, setPreviousDetections] = React.useState<Map<string, any>>(new Map())
   
   // Find EXACT 1280x720 format that our coordinate transformation expects
   const format = React.useMemo(() => {
@@ -103,7 +157,7 @@ export default function NativePreprocessingApp(): React.ReactNode {
       // Update FPS counter
       updateFps()
       
-      // BACK TO NATIVE C++ MODE FOR TENSOR DUMP
+      // TO NATIVE C++ MODE FOR TENSOR DUMP
       try {
         if (!universalScanner || typeof universalScanner.call !== 'function') {
           return
@@ -111,13 +165,22 @@ export default function NativePreprocessingApp(): React.ReactNode {
         
         // Run the universal scanner with native preprocessing using VisionCamera plugin
         const result = universalScanner.call(frame, {
-          enabledTypes: ['code_qr_barcode', 'code_container_h', 'code_container_v', 'code_license_plate'],
-          verbose: true,
+          enabledTypes: [
+            CODE_DETECTION_TYPES.QR_BARCODE, 
+            CODE_DETECTION_TYPES.CONTAINER_H, 
+            CODE_DETECTION_TYPES.CONTAINER_V, 
+            CODE_DETECTION_TYPES.LICENSE_PLATE,
+            CODE_DETECTION_TYPES.SEAL
+          ],
           debugImages: debugImages,
-        })
+        }) as DetectionResult
         
-        if (result) {
+        if (result?.error) {
+          console.error('Scanner error:', result.error)
+        } else if (result?.detections && result.detections.length > 0) {
           onScanResult(result)
+        } else {
+          // No detections found - this is normal, don't call callback
         }
       } catch (error) {
         console.log('VisionCamera universalScanner error:', error)
@@ -132,6 +195,25 @@ export default function NativePreprocessingApp(): React.ReactNode {
   React.useEffect(() => {
     requestPermission()
   }, [requestPermission])
+  
+  // Update previous detection positions for smooth transitions
+  React.useEffect(() => {
+    if (lastResult?.detections) {
+      const newPreviousDetections = new Map()
+      lastResult.detections.forEach((detection: any, index: number) => {
+        // Use the same key generation logic as in render
+        const detectionKey = `${detection.type}-${Math.round(detection.x)}-${Math.round(detection.y)}`
+        // Store current position as previous for next render
+        newPreviousDetections.set(detectionKey, {
+          x: detection.x,
+          y: detection.y,
+          width: detection.width,
+          height: detection.height
+        })
+      })
+      setPreviousDetections(newPreviousDetections)
+    }
+  }, [lastResult])
 
   const renderBoundingBoxes = () => {
     if (!lastResult?.detections) return null
@@ -246,25 +328,20 @@ export default function NativePreprocessingApp(): React.ReactNode {
           console.log(`Screen center: (${screenCenterX.toFixed(1)},${screenCenterY.toFixed(1)})`)
           console.log(`Final box: left=${boxLeft.toFixed(1)}, top=${boxTop.toFixed(1)}, size=${screenW.toFixed(1)}×${screenH.toFixed(1)}`)
           
+          // Create a unique key for tracking detection positions
+          const detectionKey = `${detection.type}-${Math.round(detection.x)}-${Math.round(detection.y)}`
+          const previousPosition = previousDetections.get(detectionKey)
+          
           return (
-            <React.Fragment key={index}>
-              {/* Main bounding box (green) */}
-              <View
-                style={[
-                  styles.boundingBox,
-                  {
-                    left: Math.max(0, boxLeft),
-                    top: Math.max(0, boxTop),
-                    width: Math.max(20, screenW),
-                    height: Math.max(20, screenH),
-                  }
-                ]}
-              >
-                <Text style={styles.boundingBoxLabel}>
-                  {detection.type.replace('code_', '')}: {(parseFloat(detection.confidence) * 100).toFixed(0)}%
-                </Text>
-              </View>
-            </React.Fragment>
+            <AnimatedBoundingBox
+              key={detectionKey}
+              detection={detection}
+              boxLeft={Math.max(0, boxLeft)}
+              boxTop={Math.max(0, boxTop)}
+              screenW={screenW}
+              screenH={screenH}
+              previousPosition={previousPosition}
+            />
           )
         })}
       </View>

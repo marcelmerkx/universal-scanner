@@ -30,7 +30,7 @@ export default function OnnxApp(): React.ReactNode {
   const { hasPermission, requestPermission } = useCameraPermission()
   const device = useCameraDevice('back')
 
-  // TODO: Replace with actual YOLOv7 model from /detection/models/
+  // TODO: Replace with actual YOLOv8n-v7 model from /detection/models/
   const model = useOnnxModel(require('../assets/efficientdet.onnx'), 'cpu')
   const actualModel = model.state === 'loaded' ? model.model : undefined
 
@@ -67,7 +67,7 @@ export default function OnnxApp(): React.ReactNode {
       const raw3d = result[0] as unknown as number[][][]
       if (raw3d && raw3d[0]) {
         const preds2d = raw3d[0] // Shape: [9, 8400] or [8400, 9]
-        const attributes = 9 // 4 bbox + 5 classes for YOLOv7 model
+        const attributes = 9 // 4 bbox + 5 classes for YOLOv8n model
         const predsAlongLastDim = preds2d[0].length !== attributes
         
         // Get first detection's confidence (class scores start at index 4)
