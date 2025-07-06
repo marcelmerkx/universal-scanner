@@ -12,6 +12,7 @@ import { ScannerResult, useOnnxModel } from 'react-native-fast-tflite'
 import { useResizePlugin } from 'vision-camera-resize-plugin'
 import { Worklets } from 'react-native-worklets-core'
 import { CODE_DETECTION_TYPES } from './CodeDetectionTypes'
+import { renderSimplifiedBoundingBoxes } from './SimplifiedBoundingBoxes'
 // import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated'
 
 // Type definitions for scanner results
@@ -216,137 +217,17 @@ export default function NativePreprocessingApp(): React.ReactNode {
   }, [lastResult])
 
   const renderBoundingBoxes = () => {
-    if (!lastResult?.detections) return null
-    
-    return (
-      <View style={styles.boundingBoxContainer}>
-        {lastResult.detections.map((detection: any, index: number) => {
-          // C++ returns pixel coordinates in 640x640 ONNX space (center point + dimensions)
-          const onnxX = parseInt(detection.x)      // Center X in 640x640 space
-          const onnxY = parseInt(detection.y)      // Center Y in 640x640 space  
-          const onnxW = parseInt(detection.width)  // Width in 640x640 space
-          const onnxH = parseInt(detection.height) // Height in 640x640 space
-          
-          console.log(`Raw C++ coordinates: (${onnxX},${onnxY}) size=${onnxW}×${onnxH}`)
-          
-          // ROTATION-AWARE COORDINATE TRANSFORMATION
-          // Account for: Camera → 90°CW rotation → padding → ONNX → screen crop
-          
-          const modelSize = 640
-          const cameraFormat = format || { videoWidth: 1280, videoHeight: 720 }
-          
-          // After 90° CW rotation: 1280×720 becomes 720×1280
-          const rotatedCameraWidth = cameraFormat.videoHeight   // 720
-          const rotatedCameraHeight = cameraFormat.videoWidth   // 1280
-          
-          console.log(`Camera: ${cameraFormat.videoWidth}×${cameraFormat.videoHeight} → Rotated: ${rotatedCameraWidth}×${rotatedCameraHeight}`)
-          console.log(`Screen: ${screenDimensions.width}×${screenDimensions.height}`)
-          console.log(`Model: ${modelSize}×${modelSize}`)
-          
-          // Step 1: Understand padding in ONNX space
-          // 720×1280 image needs to fit in 640×640
-          // Scale factor to fit: min(640/720, 640/1280) = 0.5
-          const onnxScale = Math.min(modelSize / rotatedCameraWidth, modelSize / rotatedCameraHeight)
-          const scaledWidth = rotatedCameraWidth * onnxScale    // 720 * 0.5 = 360
-          const scaledHeight = rotatedCameraHeight * onnxScale  // 1280 * 0.5 = 640
-          
-          // Padding applied TOP-LEFT aligned (C++ WhitePadding implementation)
-          const paddingLeft = 0     // Image starts at x=0
-          const paddingTop = 0      // Image starts at y=0
-          
-          console.log(`ONNX padding: left=${paddingLeft}, top=${paddingTop}, scale=${onnxScale.toFixed(3)}`)
-          
-          // Step 2: Convert ONNX center coordinates to rotated camera coordinates
-          // IMPORTANT: ONNX returns CENTER coordinates (x_center, y_center) in YOLO format
-          // We need to convert these center coordinates properly
-          
-          // First, check if detection center is within the padded content area
-          if (onnxX < paddingLeft || onnxX > (paddingLeft + scaledWidth)) {
-            console.log(`Detection center X (${onnxX}) outside content area [${paddingLeft}, ${paddingLeft + scaledWidth}]`)
-          }
-          
-          // Map from padded ONNX space to original rotated camera space
-          // These are CENTER coordinates, so we map the center point
-          const contentCenterX = onnxX - paddingLeft  // Center position within scaled content
-          const contentCenterY = onnxY - paddingTop   // Center position within scaled content
-          
-          const unpaddedCenterX = contentCenterX / onnxScale  // Scale back to original size
-          const unpaddedCenterY = contentCenterY / onnxScale
-          const unpaddedW = onnxW / onnxScale
-          const unpaddedH = onnxH / onnxScale
-          
-          // Convert from center coordinates to top-left for easier processing
-          const unpaddedX = unpaddedCenterX - unpaddedW / 2
-          const unpaddedY = unpaddedCenterY - unpaddedH / 2
-          
-          console.log(`Unpadded center: (${unpaddedCenterX.toFixed(1)},${unpaddedCenterY.toFixed(1)}) -> top-left: (${unpaddedX.toFixed(1)},${unpaddedY.toFixed(1)}) size=${unpaddedW.toFixed(1)}×${unpaddedH.toFixed(1)}`)
-          
-          // Step 3: Calculate screen scaling (resizeMode="contain") 
-          // VisionCamera scales the rotated camera to fit within screen (no cropping)
-          const screenAspect = screenDimensions.width / screenDimensions.height
-          const rotatedCameraAspect = rotatedCameraWidth / rotatedCameraHeight
-          
-          let displayScale, displayOffsetX = 0, displayOffsetY = 0
-          let displayWidth, displayHeight
-          
-          if (screenAspect > rotatedCameraAspect) {
-            // Screen is wider - camera fits height, add padding on sides
-            displayScale = screenDimensions.height / rotatedCameraHeight
-            displayWidth = rotatedCameraWidth * displayScale
-            displayHeight = screenDimensions.height
-            displayOffsetX = (screenDimensions.width - displayWidth) / 2
-            displayOffsetY = 0
-          } else {
-            // Screen is taller - camera fits width, add padding top/bottom  
-            displayScale = screenDimensions.width / rotatedCameraWidth
-            displayWidth = screenDimensions.width
-            displayHeight = rotatedCameraHeight * displayScale
-            displayOffsetX = 0
-            displayOffsetY = (screenDimensions.height - displayHeight) / 2
-          }
-          
-          console.log(`Contain mode: scale=${displayScale.toFixed(3)}, display=${displayWidth.toFixed(1)}x${displayHeight.toFixed(1)}`)
-          console.log(`Display offsets: X=${displayOffsetX.toFixed(1)}, Y=${displayOffsetY.toFixed(1)}`)
-          
-          // Step 4: Map to screen coordinates (no cropping, just scaling + offset)
-          // Use CENTER coordinates for proper mapping to screen space
-          const normalizedX = unpaddedCenterX / rotatedCameraWidth
-          const normalizedY = unpaddedCenterY / rotatedCameraHeight
-          
-          // Direct mapping - no cropping involved
-          const screenCenterX = normalizedX * displayWidth + displayOffsetX
-          const screenCenterY = normalizedY * displayHeight + displayOffsetY
-          const screenW = (unpaddedW / rotatedCameraWidth) * displayWidth
-          const screenH = (unpaddedH / rotatedCameraHeight) * displayHeight
-          
-          // Convert from center coordinates to top-left for React Native View
-          const boxLeft = screenCenterX - screenW / 2
-          const boxTop = screenCenterY - screenH / 2
-          
-          console.log(`=== CONTAIN MODE MAPPING ===`)
-          console.log(`Normalized in camera: (${normalizedX.toFixed(3)},${normalizedY.toFixed(3)})`)
-          console.log(`Screen center: (${screenCenterX.toFixed(1)},${screenCenterY.toFixed(1)})`)
-          console.log(`Final box: left=${boxLeft.toFixed(1)}, top=${boxTop.toFixed(1)}, size=${screenW.toFixed(1)}×${screenH.toFixed(1)}`)
-          
-          // Create a unique key for tracking detection positions
-          const detectionKey = `${detection.type}-${Math.round(detection.x)}-${Math.round(detection.y)}`
-          const previousPosition = previousDetections.get(detectionKey)
-          
-          return (
-            <AnimatedBoundingBox
-              key={detectionKey}
-              detection={detection}
-              boxLeft={Math.max(0, boxLeft)}
-              boxTop={Math.max(0, boxTop)}
-              screenW={screenW}
-              screenH={screenH}
-              previousPosition={previousPosition}
-            />
-          )
-        })}
-      </View>
+    return renderSimplifiedBoundingBoxes(
+      lastResult,
+      format,
+      screenDimensions,
+      previousDetections,
+      AnimatedBoundingBox,
+      styles
     )
   }
+  
+  
 
   const renderResult = () => {
     if (!lastResult) return null
@@ -383,13 +264,12 @@ export default function NativePreprocessingApp(): React.ReactNode {
             pixelFormat="yuv"
             enableFpsGraph={true}
             format={format}
-            resizeMode="contain"
           />
           <View style={styles.overlay}>
             <Text style={styles.fps}>FPS: {fps}</Text>
             <Text style={styles.title}>Native C++ ONNX Detection</Text>
             <Text style={styles.subtitle}>
-              Real-time license plate detection with bounding boxes
+              Real-time object detection with bounding boxes
             </Text>
             <TouchableOpacity 
               style={styles.debugButton} 
@@ -567,7 +447,7 @@ const styles = StyleSheet.create({
     pointerEvents: 'none',
   },
   overlaySection: {
-    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+    backgroundColor: 'rgba(0, 0, 0, 0.1)', // Much more transparent to see camera alignment
   },
   middleSection: {
     flexDirection: 'row',
