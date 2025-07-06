@@ -96,7 +96,7 @@ bool OnnxProcessor::initializeModel() {
 // For now I'll add a stub and we can move the implementation
 
 DetectionResult OnnxProcessor::processFrame(int width, int height, JNIEnv* env, jobject context, 
-                                            const uint8_t* frameData, size_t frameSize) {
+                                            const uint8_t* frameData, size_t frameSize, uint8_t enabledCodeTypesMask) {
     try {
         // Initialize components
         if (!modelLoaded && !initializeModel()) return {};
@@ -112,7 +112,7 @@ DetectionResult OnnxProcessor::processFrame(int width, int height, JNIEnv* env, 
         if (inputTensor.empty()) return {};
         
         // Run inference and return result
-        return runInference(inputTensor);
+        return runInference(inputTensor, enabledCodeTypesMask);
         
     } catch (const Ort::Exception& e) {
         LOGF("ONNX inference error: %s", e.what());
@@ -258,7 +258,7 @@ std::vector<float> OnnxProcessor::createTensorFromRGB(const std::vector<uint8_t>
     return inputTensor;
 }
 
-DetectionResult OnnxProcessor::runInference(const std::vector<float>& inputTensor) {
+DetectionResult OnnxProcessor::runInference(const std::vector<float>& inputTensor, uint8_t enabledCodeTypesMask) {
     LOGF("Running ONNX inference");
     
     // Create input tensor
@@ -286,10 +286,10 @@ DetectionResult OnnxProcessor::runInference(const std::vector<float>& inputTenso
     for (auto dim : outputShape) outputSize *= dim;
     std::vector<float> output(outputData, outputData + outputSize);
     
-    return findBestDetection(output);
+    return findBestDetection(output, enabledCodeTypesMask);
 }
 
-DetectionResult OnnxProcessor::findBestDetection(const std::vector<float>& modelOutput) {
+DetectionResult OnnxProcessor::findBestDetection(const std::vector<float>& modelOutput, uint8_t enabledCodeTypesMask) {
     // Validate output format [1, 9, 8400]
     const size_t expectedFeatures = 9;
     const size_t expectedAnchors = 8400;
@@ -299,23 +299,29 @@ DetectionResult OnnxProcessor::findBestDetection(const std::vector<float>& model
         return {};
     }
     
-    LOGF("Processing %zu anchors for best detection", expectedAnchors);
+    LOGF("Processing %zu anchors for best detection with enabled types mask: 0x%02X", expectedAnchors, enabledCodeTypesMask);
     
     auto sigmoid = [](float x) { return 1.0f / (1.0f + std::exp(-x)); };
     auto getVal = [&](size_t anchorIdx, size_t featureIdx) -> float {
         return modelOutput[featureIdx * expectedAnchors + anchorIdx];
     };
     
-    // Find best anchor
+    // Find best anchor among enabled code detection types only
     size_t bestAnchor = 0;
     float bestConfidence = 0.0f;
     int bestClass = -1;
     
     for (size_t a = 0; a < expectedAnchors; a++) {
-        // Find best class for this anchor (features 4-8: 5 classes)
+        // Find best class for this anchor among enabled types only
         float maxClassProb = 0.0f;
         int classIdx = -1;
-        for (int c = 0; c < 5; c++) {
+        for (int c = 0; c < CODE_DETECTION_CLASS_COUNT; c++) {
+            // Check if this class is enabled using bitmask
+            uint8_t classMask = 1 << c;
+            if (!(enabledCodeTypesMask & classMask)) {
+                continue; // Skip disabled classes
+            }
+            
             float classProb = sigmoid(getVal(a, 4 + c));
             if (classProb > maxClassProb) {
                 maxClassProb = classProb;
@@ -340,8 +346,12 @@ DetectionResult OnnxProcessor::findBestDetection(const std::vector<float>& model
         result.height = getVal(bestAnchor, 3) / 640.0f;     // Normalize to [0,1]
         result.classIndex = bestClass;
         
-        LOGF("Best detection: class=%d, conf=%.3f, coords=(%.3f,%.3f) size=%.3fx%.3f", 
-             result.classIndex, result.confidence, result.centerX, result.centerY, result.width, result.height);
+        CodeDetectionType detectionType = indexToCodeDetectionType(bestClass);
+        LOGF("Best detection: class=%d (%s), conf=%.3f, coords=(%.3f,%.3f) size=%.3fx%.3f", 
+             result.classIndex, getCodeDetectionClassName(detectionType), result.confidence, 
+             result.centerX, result.centerY, result.width, result.height);
+    } else {
+        LOGF("No detection found above threshold for enabled types mask: 0x%02X", enabledCodeTypesMask);
     }
     
     return result;

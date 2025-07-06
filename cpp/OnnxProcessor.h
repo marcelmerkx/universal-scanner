@@ -16,6 +16,7 @@
 #include "preprocessing/ImageDebugger.h"
 #include "platform/YuvConverter.h"
 #include "platform/YuvResizer.h"
+#include "CodeDetectionConstants.h"
 
 namespace UniversalScanner {
 
@@ -63,8 +64,8 @@ private:
                                         int width, int height, int* outWidth, int* outHeight);
     std::vector<float> createTensorFromRGB(const std::vector<uint8_t>& rgbData, 
                                           int width, int height);
-    DetectionResult runInference(const std::vector<float>& inputTensor);
-    DetectionResult findBestDetection(const std::vector<float>& modelOutput);
+    DetectionResult runInference(const std::vector<float>& inputTensor, uint8_t enabledCodeTypesMask);
+    DetectionResult findBestDetection(const std::vector<float>& modelOutput, uint8_t enabledCodeTypesMask);
 
 public:
     OnnxProcessor();
@@ -72,7 +73,7 @@ public:
     
     // Main processing function
     DetectionResult processFrame(int width, int height, JNIEnv* env, jobject context, 
-                                const uint8_t* frameData, size_t frameSize);
+                                const uint8_t* frameData, size_t frameSize, uint8_t enabledCodeTypesMask = CodeDetectionMask::ALL);
     
     // Debug image control
     void setDebugImages(bool enabled) { enableDebugImages = enabled; }

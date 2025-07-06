@@ -43,7 +43,7 @@ Build a universal scanner mobile app (React Native) that detects and decodes mul
 
 **Tasks**:
 - [ ] **3.1**: Replace TensorFlow Lite with ONNX Runtime in C++ core
-- [ ] **3.2**: Integrate YOLOv7 unified detection model from `/detection/models/`
+- [ ] **3.2**: Integrate YOLOv8n unified detection model from `/detection/models/`
 - [ ] **3.3**: Implement proper ONNX nested array output handling (see ONNX-OUTPUT-FORMAT-DISCOVERY.md)
 - [ ] **3.4**: Add MLKit integration for text/barcode recognition alongside ONNX
 - [ ] **3.5**: Update VisionCamera Frame Processor plugin to call Universal Scanner
@@ -102,7 +102,7 @@ Build a universal scanner mobile app (React Native) that detects and decodes mul
 - **Frontend**: React Native, TypeScript, VisionCamera Frame Processors
 - **JSI Bridge**: VisionCamera's proven Frame Processor Plugin architecture
 - **Native**: C++, JNI (Android), Obj-C++ (iOS)
-- **ML**: ONNX Runtime (YOLOv7 detection), MLKit (text/barcode recognition)
+- **ML**: ONNX Runtime (YOLOv8n detection), MLKit (text/barcode recognition)
 - **Build**: Gradle (Android), Xcode (iOS)
 - **Performance**: Zero-copy frame processing, GPU acceleration, memory pools
 
@@ -120,7 +120,7 @@ Build a universal scanner mobile app (React Native) that detects and decodes mul
 **Next Steps (Phase 3)**:
 1. Test current TensorFlow Lite demo app on device
 2. Replace TensorFlow Lite with ONNX Runtime in C++ core
-3. Integrate YOLOv7 detection model with proper output handling
+3. Integrate YOLOv8n detection model with proper output handling
 4. Add MLKit alongside ONNX for text/barcode recognition
 5. Update plugin to call Universal Scanner instead of TensorFlow Lite
 

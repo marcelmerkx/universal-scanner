@@ -15,13 +15,17 @@ This is a universal scanner mobile app built with React Native that detects and 
 
 ## Supported Code Types
 
-The scanner supports 11 different code types with specific class names:
+The scanner supports different code types with specific class names:
+
+Initially we support:
 - `code_qr_barcode` — 2D QR codes
-- `code_license_plate` — Alphanumeric plates (generic)
 - `code_container_h` — ISO 6346 container codes (horizontal)
 - `code_container_v` — ISO 6346 container codes (vertical)
-- `text_printed` — Freeform printed text (OCR)
 - `code_seal` — Security seals with serials (often dual: QR + text)
+- `code_license_plate` — Alphanumeric plates (generic)
+
+Later on we may add classes such as:
+- `text_printed` — Freeform printed text (OCR)
 - `code_lcd_display` — Casio/LCD-style digit panels
 - `code_rail_wagon` — Railcar identifier codes
 - `code_air_container` — ULD identifiers for airfreight
@@ -35,7 +39,6 @@ interface ScannerConfig {
   enabledTypes: string[];
   regexPerType?: Record<string, string[]>;
   manualMode?: boolean;
-  verbose?: boolean;
 }
 ```
 
@@ -63,7 +66,6 @@ interface ScanResult {
 - **Domain-Specific Pipelines**: Specialized processing for each code type (container validation, license plate formatting, etc.)
 - **Offline-First**: All inference runs on-device with optimized models
 - **Performance Optimized**: Native-heavy processing to minimize RN bridge usage
-- **Verbose Mode**: Rich debugging output for development and QA
 - **Manual Targeting**: User can tap specific codes in cluttered scenes
 
 ## Project Status
@@ -71,7 +73,7 @@ interface ScanResult {
 - **Baseline Established**: Forked react-native-fast-tflite as proven VisionCamera + JSI foundation
 - **Documentation Recovered**: All user stories, technical architecture, and training assets restored
 - **TensorFlow Lite Demo Working**: Example app builds and runs successfully on Android
-- **Detection Assets Ready**: YOLOv7 models and training scripts available in `/detection/`
+- **Detection Assets Ready**: YOLOv8n models and training scripts available in `/detection/`
 - **Current Focus**: Phase 3 - TensorFlow Lite → ONNX Runtime migration
 
 ## Development Workflow
@@ -136,12 +138,12 @@ class ContainerProcessor : public ICodeProcessor {
 **Next Steps**:
 1. Test current TensorFlow Lite example app on device
 2. Replace TensorFlow Lite with ONNX Runtime in C++ core
-3. Integrate YOLOv7 detection models from `/detection/models/`
+3. Integrate YOLOv8n detection models from `/detection/models/`
 4. Add MLKit integration alongside ONNX Runtime
 5. Implement Universal Scanner plugin architecture
 
 **Available Assets**:
-- `/detection/models/unified-detection-v7.onnx` - Trained YOLOv7 model
+- `/detection/models/unified-detection-v7.onnx` - Trained YOLOv8n model, training dataset v7
 - `/detection/scripts/` - Training and testing scripts
 - `/detection/notebooks/` - Model training notebooks
 - `/ONNX-OUTPUT-FORMAT-DISCOVERY.md` - Critical output format handling

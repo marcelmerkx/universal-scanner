@@ -96,6 +96,7 @@ add_library(
   SHARED
   ../cpp/Universal.cpp
   ../cpp/OnnxProcessor.cpp
+  ../cpp/CodeDetectionConstants.cpp
   ../cpp/platform/YuvConverter.cpp
   ../cpp/platform/AndroidYuvConverter.cpp
   ../cpp/platform/AndroidYuvResizer.cpp

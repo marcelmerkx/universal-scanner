@@ -19,22 +19,18 @@
 #include "preprocessing/WhitePadding.h"
 #include "preprocessing/ImageDebugger.h"
 #include "OnnxProcessor.h"
+#include "CodeDetectionConstants.h"
 
 #define LOGF(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "UniversalNative", fmt, ##__VA_ARGS__)
 
-// Class name mapping for unified detection model
+// Class name mapping for unified detection model - use centralized constants
 const char* getClassName(int classIdx) {
-    static const char* classNames[] = {
-        "code_container_h",    // 0
-        "code_container_v",    // 1  
-        "code_license_plate",  // 2
-        "code_qr_barcode",     // 3
-        "code_seal"            // 4
-    };
-    if (classIdx >= 0 && classIdx < 5) {
-        return classNames[classIdx];
+    try {
+        UniversalScanner::CodeDetectionType type = UniversalScanner::indexToCodeDetectionType(classIdx);
+        return UniversalScanner::getCodeDetectionClassName(type);
+    } catch (const std::exception&) {
+        return "unknown";
     }
-    return "unknown";
 }
 
 using namespace facebook::jni;
@@ -584,8 +580,9 @@ public:
     }
     
     // Native method that processes real frame data from VisionCamera
-    local_ref<jstring> nativeProcessFrameWithData(int width, int height, alias_ref<jbyteArray> frameData) {
-        LOGF("nativeProcessFrameWithData called with %dx%d, frame data size: %zu", width, height, frameData->size());
+    local_ref<jstring> nativeProcessFrameWithData(int width, int height, alias_ref<jbyteArray> frameData, int enabledTypesMask) {
+        LOGF("nativeProcessFrameWithData called with %dx%d, frame data size: %zu, enabled types mask: 0x%02X", 
+             width, height, frameData->size(), enabledTypesMask);
         
         try {
             // Initialize processor if needed
@@ -605,7 +602,7 @@ public:
             
             // Call the real ONNX processing with actual frame data
             UniversalScanner::DetectionResult result = g_onnxProcessor->processFrame(
-                width, height, jniEnv, nullptr, frameBytes, dataSize
+                width, height, jniEnv, nullptr, frameBytes, dataSize, static_cast<uint8_t>(enabledTypesMask)
             );
             
             // Format results as JSON

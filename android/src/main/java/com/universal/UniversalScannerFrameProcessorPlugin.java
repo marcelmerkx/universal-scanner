@@ -94,6 +94,15 @@ public class UniversalScannerFrameProcessorPlugin extends FrameProcessorPlugin {
                     Log.i(TAG, "Debug images " + (debugImages ? "enabled" : "disabled"));
                 }
                 
+                // Handle enabledTypes argument and convert to bitmask
+                int enabledTypesMask = 0x1F; // Default: all 5 classes enabled (0x01 | 0x02 | 0x04 | 0x08 | 0x10)
+                if (arguments != null && arguments.containsKey("enabledTypes")) {
+                    @SuppressWarnings("unchecked")
+                    List<String> enabledTypes = (List<String>) arguments.get("enabledTypes");
+                    enabledTypesMask = convertEnabledTypesToBitmask(enabledTypes);
+                    Log.i(TAG, "Enabled types mask: 0x" + Integer.toHexString(enabledTypesMask).toUpperCase());
+                }
+                
                 // Extract actual frame data from VisionCamera Image
                 android.media.Image.Plane[] planes = image.getPlanes();
                 
@@ -117,7 +126,7 @@ public class UniversalScannerFrameProcessorPlugin extends FrameProcessorPlugin {
                 Log.i(TAG, "Extracted frame data: " + frameData.length + " bytes (Y:" + ySize + " U:" + uSize + " V:" + vSize + ")");
                 
                 // Call native processing with real frame data
-                String jsonResult = nativeModule.nativeProcessFrameWithData(width, height, frameData);
+                String jsonResult = nativeModule.nativeProcessFrameWithData(width, height, frameData, enabledTypesMask);
                 Log.i(TAG, "Native result: " + jsonResult);
                 
                 // Parse JSON result and convert to expected format
@@ -172,5 +181,41 @@ public class UniversalScannerFrameProcessorPlugin extends FrameProcessorPlugin {
         List<Map<String, Object>> detections = new ArrayList<>();
         result.put("detections", detections);
         return result;
+    }
+    
+    /**
+     * Convert enabledTypes string array to bitmask for efficient native processing
+     * Matches the constants defined in CodeDetectionConstants.h
+     */
+    private int convertEnabledTypesToBitmask(List<String> enabledTypes) {
+        if (enabledTypes == null || enabledTypes.isEmpty()) {
+            return 0x1F; // All 5 classes enabled by default
+        }
+        
+        int mask = 0;
+        for (String type : enabledTypes) {
+            switch (type) {
+                case "code_container_h":
+                    mask |= 0x01; // CONTAINER_H = bit 0
+                    break;
+                case "code_container_v":
+                    mask |= 0x02; // CONTAINER_V = bit 1
+                    break;
+                case "code_license_plate":
+                    mask |= 0x04; // LICENSE_PLATE = bit 2
+                    break;
+                case "code_qr_barcode":
+                    mask |= 0x08; // QR_BARCODE = bit 3
+                    break;
+                case "code_seal":
+                    mask |= 0x10; // SEAL = bit 4
+                    break;
+                default:
+                    Log.w(TAG, "Unknown code detection type: " + type);
+                    break;
+            }
+        }
+        
+        return mask;
     }
 }

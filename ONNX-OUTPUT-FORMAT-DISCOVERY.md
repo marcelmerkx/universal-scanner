@@ -30,7 +30,7 @@ const raw3d = output.value as number[][][];
 const preds2d = raw3d[0]; // Extract 2D array from 3D wrapper
 
 // Handle both possible orientations: [ATTRIBUTES, N] or [N, ATTRIBUTES]
-const attributes = 9; // 4 bbox + 5 classes for YOLOv7 model
+const attributes = 9; // 4 bbox + 5 classes for YOLOv8n model
 const predsAlongLastDim = preds2d[0].length !== attributes;
 
 function getVal(anchorIdx: number, featureIdx: number): number {
@@ -49,7 +49,7 @@ const confidence = getVal(i, 4);
 
 ## Model Output Shape Analysis
 
-For our YOLO8n v7 container detection model:
+For our YOLOv8n v7 container detection model:
 - **Expected Shape**: `[1, 9, 8400]` or `[1, 8400, 9]`
 - **Attributes**: 9 (4 bbox + 5 classes)
 - **Anchors**: 8400 detection points
