@@ -80,3 +80,6 @@ detection/notebooks/runs/*
 detection/notebooks/Unified-detection-*
 debug_images/*
 android/src/main/assets/*
+
+# sample app for piggybacking
+ContainerCameraApp/

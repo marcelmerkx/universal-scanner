@@ -1,131 +1,123 @@
-# Execution Provider Strategy for ONNX Runtime
+# Mobile Object Detection Performance Optimization
 
-This document outlines our strategy for selecting and applying the best ONNX Runtime execution provider at runtime for Android and iOS platforms.
+This document outlines our performance optimization strategy for real-time object detection on mobile devices, based on extensive testing and research.
 
-We aim to prioritise hardware acceleration (GPU/NPU) when available, while maintaining reliable fallback to CPU on all devices. Selection happens during model session initialisation.
+**Key Finding**: For small YOLO models on mobile devices, **model size optimization significantly outperforms hardware acceleration** due to GPU delegation overhead and setup costs.
 
 ---
 
 ## 🧠 Goals
 
-- Select the best available delegate (NNAPI, CoreML, or CPU) at runtime
-- Avoid hardcoding platform logic throughout the codebase
-- Catch delegate init failures gracefully and fall back to CPU
-- Enable verbose logging for debugging and field diagnostics
+- Achieve optimal real-time performance (15+ FPS) on mobile devices
+- Minimize latency while maintaining detection accuracy
+- Use proven optimization techniques over experimental hardware acceleration
+- Provide scalable performance across different device capabilities
 
 ---
 
-## 📦 Core Abstractions
+## 🔍 Real-World Testing Results (Samsung S24)
 
-### `ExecutionProvider` enum
+### GPU Acceleration Analysis
+- **NNAPI Testing**: Attempted hardware acceleration via NNAPI on Samsung S24
+- **Result**: No performance improvement, likely due to:
+  - GPU delegation overhead exceeding computation time for small models
+  - NNAPI falling back to CPU execution with additional overhead
+  - Memory transfer costs between CPU and GPU
+  - ARM Mali GPU limitations with ONNX Runtime
 
-```cpp
-enum class ExecutionProvider {
-    CPU,
-    NNAPI,
-    COREML
-};
+### Model Size Optimization Success
+- **320x320 Model**: 20 FPS (43% faster than 640x640)
+- **416x416 Model**: 17 FPS (21% faster than 640x640)  
+- **640x640 Model**: 14 FPS (baseline)
+- **Accuracy Impact**: Only 1% confidence drop (70% → 69%)
 
-const char* toString(ExecutionProvider ep) {
-    switch (ep) {
-        case ExecutionProvider::CPU: return "cpu";
-        case ExecutionProvider::NNAPI: return "nnapi";
-        case ExecutionProvider::COREML: return "coreml";
-        default: return "unknown";
-    }
-}
-```
+**Conclusion**: Model size reduction delivers real performance gains with minimal accuracy loss.
 
 ---
 
-## 🔧 `OnnxDelegateManager` Implementation
+## 🎯 Adopted Strategy: Model Size Optimization
 
-This class attempts to apply the best available delegate based on the target platform.
+Instead of pursuing GPU acceleration, we optimize through:
 
-```cpp
-// onnx_delegate_manager.h
-#pragma once
+### 1. **Flexible Model Sizes**
+- **320x320**: Best for real-time applications (20 FPS)
+- **416x416**: Balanced performance/quality (17 FPS)  
+- **640x640**: Highest accuracy when FPS is not critical (14 FPS)
 
-#include <string>
-#include <onnxruntime_cxx_api.h>
-#include "log.h"  // Assumes LOGF is defined
-
-class OnnxDelegateManager {
-public:
-    static ExecutionProvider configure(Ort::SessionOptions& session_options, bool verbose = false) {
-#ifdef __ANDROID__
-        try {
-            session_options.AppendExecutionProvider_Nnapi();
-            if (verbose) {
-                LOGF("[DelegateManager] Using NNAPI delegate.");
-            }
-            return ExecutionProvider::NNAPI;
-        } catch (...) {
-            if (verbose) {
-                LOGF("[DelegateManager] NNAPI unavailable, falling back to CPU.");
-            }
-        }
-#endif
-
-#ifdef __APPLE__
-        try {
-            session_options.AppendExecutionProvider_CoreML(0); // flag 0 = default
-            if (verbose) {
-                LOGF("[DelegateManager] Using CoreML delegate.");
-            }
-            return ExecutionProvider::COREML;
-        } catch (...) {
-            if (verbose) {
-                LOGF("[DelegateManager] CoreML unavailable, falling back to CPU.");
-            }
-        }
-#endif
-
-        if (verbose) {
-            LOGF("[DelegateManager] Using default CPU delegate.");
-        }
-        return ExecutionProvider::CPU;
-    }
-};
-```
+### 2. **Dynamic Model Selection**
+Users can switch between model sizes based on use case:
+- **High-speed scanning**: 320x320
+- **Balanced operation**: 416x416
+- **Maximum accuracy**: 640x640
 
 ---
 
-## 🔍 Why We Check Platform, Not Hardware
+### 1. **Model Quantization** (Recommended Next Step)
+- **INT8 Quantization**: Reduce model size by ~75% with minimal accuracy loss
+- **FP16 Quantization**: 50% size reduction, better accuracy retention than INT8
+- **Expected Gain**: Additional 20-30% performance improvement
 
-We use platform macros (`__ANDROID__`, `__APPLE__`) to select delegates, even though they don't guarantee actual acceleration:
+### 2. **Preprocessing Optimizations**
+- **YUV Resizing**: Resize before RGB conversion (already implemented)
+- **NEON SIMD**: ARM optimization for image processing operations
+- **Memory Pooling**: Reuse allocated buffers to reduce allocation overhead
 
-- `NNAPI` (Android): available on API level 27+, may run on CPU or hardware
-- `CoreML` (iOS): available on most modern devices, automatically maps to neural engines or CPU
+### 3. **Threading Optimizations**
+- **Optimal Thread Count**: 4 threads for modern mobile CPUs (already implemented)
+- **Frame Dropping**: Skip processing if previous frame still processing
+- **Async Processing**: Process frames on background thread
 
-Rather than detect hardware, we try the delegate and **catch failures**, falling back to CPU.
+### 4. **Model Architecture Improvements**
+- **Pruning**: Remove less important neurons/weights
+- **Knowledge Distillation**: Train smaller student model from larger teacher
+- **MobileNet Backbone**: Switch to mobile-optimized backbone architecture
+
+### 5. **Platform-Specific Optimizations**
+
+#### Android
+- **ARM NEON**: Vectorized CPU operations
+- **CPU Governor**: Request performance mode during scanning
+- **Thermal Throttling**: Monitor and adapt to device thermal state
+
+#### iOS  
+- **Accelerate Framework**: Apple's optimized linear algebra
+- **Core ML**: For iOS-specific deployments
+- **Metal Performance Shaders**: GPU compute if beneficial
 
 ---
 
-## 🔁 Typical Usage
+## 🚀 Performance Roadmap
 
-```cpp
-Ort::SessionOptions options;
-ExecutionProvider ep = OnnxDelegateManager::configure(options, true);
-```
+### Immediate (Implemented)
+- ✅ Flexible model sizes (320/416/640)
+- ✅ Optimized preprocessing pipeline
+- ✅ Multi-threaded CPU execution
 
-The selected `ExecutionProvider` can be embedded in verbose logs or returned in metadata.
+### Short Term (Next Sprint)
+- 🎯 **INT8 Quantization**: Expected 25% additional speedup
+- 🎯 **Memory Pool Optimization**: Reduce allocation overhead
+- 🎯 **Frame Rate Limiting**: Prevent unnecessary processing
+
+### Medium Term
+- 📋 **Model Pruning**: Further size reduction while maintaining accuracy
+- 📋 **Custom Mobile Architecture**: YOLOv8n-mobile variant
+- 📋 **Benchmark Suite**: Automated performance testing across devices
+
+### Research
+- 🔬 **Knowledge Distillation**: Ultra-lightweight models (Sub-320x320)
+- 🔬 **Dynamic Resolution**: Adaptive quality based on detection confidence
+- 🔬 **Edge TPU**: Google Coral integration for specific deployments
 
 ---
 
-## ✅ Benefits of This Approach
+## 📊 Current Performance Baseline
 
-- Clean platform separation in a single place
-- Robust fallback to CPU without crashing
-- Logs help us debug behaviour across devices
-- Can be extended later to include performance benchmarking or delegate overrides
+| Model Size | FPS | Accuracy | Use Case |
+|------------|-----|----------|----------|
+| 320x320 | 20 | 69% | Real-time scanning |
+| 416x416 | 17 | 69-70% | Balanced operation |
+| 640x640 | 14 | 70% | Maximum accuracy |
 
----
-
-## 💡 Future Enhancements
-
-- Benchmark-based selection (run small inferences on init)
-- Support for user-configured override via DTO (e.g. `"delegate": "cpu" | "nnapi" | "coreml" | "auto"`)
-- Add support for TFLite or Metal delegates if we move beyond ONNX Runtime
+**Target**: Achieve 30+ FPS with 320x320 + INT8 quantization while maintaining 65%+ accuracy.
 
 ---

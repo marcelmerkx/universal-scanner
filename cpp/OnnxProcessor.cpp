@@ -132,10 +132,10 @@ bool OnnxProcessor::initializeModel() {
         // First attempt: Try with hardware acceleration (NNAPI/CoreML)
         try {
             Ort::SessionOptions sessionOptions;
-            sessionOptions.SetIntraOpNumThreads(1);
             
-            // Use OnnxDelegateManager to select best execution provider (GPU acceleration when available)
-            currentExecutionProvider = OnnxDelegateManager::configure(sessionOptions, true);
+            // Use OnnxDelegateManager to select best execution provider with NNAPI enabled
+            // Parameters: (sessionOptions, verbose, preferXNNPACK, disableNNAPI)
+            currentExecutionProvider = OnnxDelegateManager::configure(sessionOptions, true, true, false);
             
             // Create session from memory buffer
             session = std::make_unique<Ort::Session>(*ortEnv, modelData.data(), modelData.size(), sessionOptions);
