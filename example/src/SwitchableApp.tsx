@@ -27,7 +27,7 @@ import {
 import { useResizePlugin } from 'vision-camera-resize-plugin'
 import { Worklets } from 'react-native-worklets-core'
 
-type InferenceMode = 'tflite' | 'onnx' | 'native'
+type InferenceMode = 'tflite' | 'onnx' | 'native' | 'tflite-direct'
 
 interface Detection {
   className: string

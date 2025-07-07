@@ -28,8 +28,10 @@ public class UniversalNativeModule {
     
     public native String nativeProcessFrame(int width, int height);
     
-    public native String nativeProcessFrameWithData(int width, int height, byte[] frameData, int enabledTypesMask);
+    public native String nativeProcessFrameWithData(int width, int height, byte[] frameData, int enabledTypesMask, boolean useTflite);
     
     public native void setDebugImages(boolean enabled);
+    
+    public native void setModelSize(int size);
     
 }

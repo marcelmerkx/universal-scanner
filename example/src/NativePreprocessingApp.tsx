@@ -72,6 +72,7 @@ export default function NativePreprocessingApp(): React.ReactNode {
   const [lastResult, setLastResult] = React.useState<any>(null)
   const [fps, setFps] = React.useState(0)
   const [debugImages, setDebugImages] = React.useState(false)
+  const [useTflite, setUseTflite] = React.useState(false) // Toggle for A/B testing - DEFAULT TO ONNX (TFLite crashes in C++)
   const screenDimensions = Dimensions.get('window')
   const [previousDetections, setPreviousDetections] = React.useState<Map<string, any>>(new Map())
   
@@ -174,6 +175,7 @@ export default function NativePreprocessingApp(): React.ReactNode {
             CODE_DETECTION_TYPES.SEAL
           ],
           debugImages: debugImages,
+          useTflite: useTflite, // Enable TFLite backend for A/B testing
         }) as DetectionResult
         
         if (result?.error) {
@@ -267,18 +269,28 @@ export default function NativePreprocessingApp(): React.ReactNode {
           />
           <View style={styles.overlay}>
             <Text style={styles.fps}>FPS: {fps}</Text>
-            <Text style={styles.title}>Native C++ ONNX Detection</Text>
+            <Text style={styles.title}>Native C++ {useTflite ? 'TFLite' : 'ONNX'} Detection</Text>
             <Text style={styles.subtitle}>
               Real-time object detection with bounding boxes
             </Text>
-            <TouchableOpacity 
-              style={styles.debugButton} 
-              onPress={() => setDebugImages(!debugImages)}
-            >
-              <Text style={styles.debugButtonText}>
-                Debug Images: {debugImages ? 'ON' : 'OFF'}
-              </Text>
-            </TouchableOpacity>
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity 
+                style={styles.debugButton} 
+                onPress={() => setDebugImages(!debugImages)}
+              >
+                <Text style={styles.debugButtonText}>
+                  Debug Images: {debugImages ? 'ON' : 'OFF'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.debugButton, styles.tfliteButton]} 
+                onPress={() => setUseTflite(!useTflite)}
+              >
+                <Text style={styles.debugButtonText}>
+                  Backend: {useTflite ? 'TFLite' : 'ONNX'}
+                </Text>
+              </TouchableOpacity>
+            </View>
             {renderResult()}
           </View>
           
@@ -414,13 +426,20 @@ const styles = StyleSheet.create({
     color: 'white',
     marginTop: 1,
   },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 10,
+  },
   debugButton: {
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     paddingHorizontal: 15,
     paddingVertical: 8,
     borderRadius: 20,
-    marginBottom: 10,
-    alignSelf: 'center',
+  },
+  tfliteButton: {
+    backgroundColor: 'rgba(255, 128, 0, 0.3)',
   },
   debugButtonText: {
     color: 'white',

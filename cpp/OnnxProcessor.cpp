@@ -1,5 +1,7 @@
 #include "OnnxProcessor.h"
 #include <android/log.h>
+#include <android/asset_manager.h>
+#include <android/asset_manager_jni.h>
 
 #define LOGF(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "UniversalScanner", fmt, ##__VA_ARGS__)
 
@@ -9,7 +11,14 @@ extern const char* getClassName(int classIdx);
 namespace UniversalScanner {
 
 OnnxProcessor::OnnxProcessor() 
-    : memoryInfo(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)), modelLoaded(false), yuvConverter(nullptr), enableDebugImages(false) {
+    : memoryInfo(Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault)), 
+      modelLoaded(false), 
+      modelSize_(320),  // Default to 320 for faster initialization
+      yuvConverter(nullptr), 
+      enableDebugImages(false), 
+      currentExecutionProvider(ExecutionProvider::CPU),
+      assetManager_(nullptr),
+      env_(nullptr) {
     LOGF("OnnxProcessor created");
     
     // Enable debug images by default in DEBUG builds, disable in release
@@ -20,12 +29,6 @@ OnnxProcessor::OnnxProcessor()
         enableDebugImages = false;
         LOGF("Debug images disabled (RELEASE build)");
     #endif
-    
-    // Initialize model info for unified-detection-v7.onnx
-    modelInfo.inputShape = {1, 3, 640, 640}; // NCHW format
-    modelInfo.outputShape = {1, 9, 8400}; // 9 features x 8400 anchors (4 bbox + 5 classes, NO objectness)
-    modelInfo.inputName = "images";
-    modelInfo.outputName = "output0";
 }
 
 // Load model from file path 
@@ -55,35 +58,122 @@ std::vector<uint8_t> loadModelFromFile(const std::string& filePath) {
     return modelData;
 }
 
+// Load model from Android assets
+std::vector<uint8_t> loadModelFromAssets(JNIEnv* env, jobject assetManager, const std::string& filename) {
+    AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
+    if (!mgr) {
+        LOGF("Failed to get AAssetManager");
+        return {};
+    }
+    
+    AAsset* asset = AAssetManager_open(mgr, filename.c_str(), AASSET_MODE_BUFFER);
+    if (!asset) {
+        LOGF("Failed to open asset: %s", filename.c_str());
+        return {};
+    }
+    
+    off_t fileSize = AAsset_getLength(asset);
+    std::vector<uint8_t> modelData(fileSize);
+    
+    int bytesRead = AAsset_read(asset, modelData.data(), fileSize);
+    AAsset_close(asset);
+    
+    if (bytesRead != fileSize) {
+        LOGF("Failed to read complete asset file");
+        return {};
+    }
+    
+    LOGF("Loaded ONNX model from assets: %s (%zu bytes)", filename.c_str(), modelData.size());
+    return modelData;
+}
+
 bool OnnxProcessor::initializeModel() {
     if (modelLoaded) return true;
     
     try {
-        // Try to load model from internal storage
-        std::string modelPath = "/data/data/com.cargosnap.universalscanner/files/unified-detection-v7.onnx";
+        // Update model info based on size
+        modelInfo.inputShape = {1, 3, modelSize_, modelSize_}; // NCHW format
+        // Output shape changes based on model size:
+        // 320x320: 2100 anchors, 416x416: 3549 anchors, 640x640: 8400 anchors
+        int numAnchors = (modelSize_ == 320) ? 2100 : (modelSize_ == 416) ? 3549 : 8400;
+        modelInfo.outputShape = {1, 9, numAnchors}; // 9 features x anchors
+        modelInfo.inputName = "images";
+        modelInfo.outputName = "output0";
+        
+        // Build model filename based on size
+        std::string modelFilename = "unified-detection-v7-" + std::to_string(modelSize_) + ".onnx";
+        LOGF("Loading model: %s", modelFilename.c_str());
+        
+        // Try to load model from internal storage first
+        std::string modelPath = "/data/data/com.cargosnap.universalscanner/files/" + modelFilename;
         auto modelData = loadModelFromFile(modelPath);
-        if (modelData.empty()) {
-            // Try assets location
-            modelPath = "/android_asset/unified-detection-v7.onnx";
-            modelData = loadModelFromFile(modelPath);
+        if (modelData.empty() && env_ && assetManager_) {
+            // Try loading from Android assets
+            modelData = loadModelFromAssets(env_, assetManager_, modelFilename);
             if (modelData.empty()) {
-                LOGF("Failed to load model from any location");
+                // No fallback - fail explicitly
+                LOGF("❌ ERROR: Model %s not found for size %d", modelFilename.c_str(), modelSize_);
+                LOGF("Tried paths:");
+                LOGF("  - /data/data/com.cargosnap.universalscanner/files/%s", modelFilename.c_str());
+                LOGF("  - Android assets: %s", modelFilename.c_str());
                 return false;
             }
+        } else if (modelData.empty()) {
+            LOGF("❌ ERROR: Model %s not found and AssetManager not available", modelFilename.c_str());
+            return false;
         }
         
         // Create ONNX Runtime environment
         ortEnv = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "UniversalScanner");
         
-        // Create session options
-        Ort::SessionOptions sessionOptions;
-        sessionOptions.SetIntraOpNumThreads(1);
+        // Try to create session with hardware acceleration first, fallback to CPU if it fails
+        bool sessionCreated = false;
         
-        // Create session from memory buffer
-        session = std::make_unique<Ort::Session>(*ortEnv, modelData.data(), modelData.size(), sessionOptions);
+        // First attempt: Try with hardware acceleration (NNAPI/CoreML)
+        try {
+            Ort::SessionOptions sessionOptions;
+            sessionOptions.SetIntraOpNumThreads(1);
+            
+            // Use OnnxDelegateManager to select best execution provider (GPU acceleration when available)
+            currentExecutionProvider = OnnxDelegateManager::configure(sessionOptions, true);
+            
+            // Create session from memory buffer
+            session = std::make_unique<Ort::Session>(*ortEnv, modelData.data(), modelData.size(), sessionOptions);
+            sessionCreated = true;
+            
+            LOGF("✅ ONNX model loaded successfully with %s execution provider!", 
+                 OnnxDelegateManager::getPerformanceDescription(currentExecutionProvider));
+            LOGF("📊 Expected performance: %.1fx vs CPU baseline", 
+                 OnnxDelegateManager::getPerformanceMultiplier(currentExecutionProvider));
+                 
+        } catch (const Ort::Exception& e) {
+            LOGF("⚠️ Hardware acceleration failed (%s), falling back to CPU", e.what());
+            
+            // Second attempt: Fallback to CPU-only execution
+            try {
+                Ort::SessionOptions cpuSessionOptions;
+                cpuSessionOptions.SetIntraOpNumThreads(1);
+                // No execution provider configured = CPU default
+                
+                session = std::make_unique<Ort::Session>(*ortEnv, modelData.data(), modelData.size(), cpuSessionOptions);
+                currentExecutionProvider = ExecutionProvider::CPU;
+                sessionCreated = true;
+                
+                LOGF("✅ ONNX model loaded successfully with CPU fallback");
+                LOGF("💡 Consider using a model optimized for mobile hardware acceleration");
+                
+            } catch (const Ort::Exception& cpuError) {
+                LOGF("❌ CPU fallback also failed: %s", cpuError.what());
+                return false;
+            }
+        }
+        
+        if (!sessionCreated) {
+            LOGF("❌ Failed to create ONNX session with any execution provider");
+            return false;
+        }
         
         modelLoaded = true;
-        LOGF("ONNX model loaded successfully!");
         return true;
         
     } catch (const Ort::Exception& e) {
@@ -97,26 +187,104 @@ bool OnnxProcessor::initializeModel() {
 
 DetectionResult OnnxProcessor::processFrame(int width, int height, JNIEnv* env, jobject context, 
                                             const uint8_t* frameData, size_t frameSize, uint8_t enabledCodeTypesMask) {
+    LOGF("🎬 OnnxProcessor::processFrame called with %dx%d, %zu bytes", width, height, frameSize);
+    PerformanceTimer totalTimer("TOTAL_FRAME_PROCESSING");
+    
     try {
-        // Initialize components
-        if (!modelLoaded && !initializeModel()) return {};
-        if (!initializeConverters(env, context)) return {};
+        // Store JNI environment for asset loading
+        env_ = env;
         
-        // Preprocess frame: YUV resize + RGB conversion + rotation + padding
+        // Try to get AssetManager from the Android app if not already set
+        if (!assetManager_) {
+            // Look for an Android application context
+            jclass activityThreadClass = env->FindClass("android/app/ActivityThread");
+            if (activityThreadClass) {
+                jmethodID currentApplicationMethod = env->GetStaticMethodID(activityThreadClass, "currentApplication", "()Landroid/app/Application;");
+                if (currentApplicationMethod) {
+                    jobject application = env->CallStaticObjectMethod(activityThreadClass, currentApplicationMethod);
+                    if (application) {
+                        jclass contextClass = env->GetObjectClass(application);
+                        jmethodID getAssetsMethod = env->GetMethodID(contextClass, "getAssets", "()Landroid/content/res/AssetManager;");
+                        if (getAssetsMethod) {
+                            jobject localAssetManager = env->CallObjectMethod(application, getAssetsMethod);
+                            if (localAssetManager) {
+                                assetManager_ = env->NewGlobalRef(localAssetManager);
+                                LOGF("✅ AssetManager obtained from application context");
+                            }
+                        }
+                        env->DeleteLocalRef(contextClass);
+                        env->DeleteLocalRef(application);
+                    }
+                }
+                env->DeleteLocalRef(activityThreadClass);
+            }
+        }
+        
+        // Initialize components
+        LOGF("🔧 Checking model initialization...");
+        if (!modelLoaded && !initializeModel()) {
+            LOGF("❌ Model initialization failed!");
+            return {};
+        }
+        LOGF("✅ Model loaded successfully");
+        
+        LOGF("🔧 Initializing converters...");
+        if (!initializeConverters(env, context)) {
+            LOGF("❌ Converter initialization failed!");
+            return {};
+        }
+        LOGF("✅ Converters initialized");
+        
+        // PHASE 1: Preprocessing (YUV resize + RGB conversion + rotation + padding)
+        LOGF("🔄 Starting preprocessing phase...");
+        PerformanceTimer preprocessTimer("PREPROCESSING");
         int processedWidth, processedHeight;
         auto rgbData = preprocessFrame(frameData, frameSize, width, height, &processedWidth, &processedHeight);
-        if (rgbData.empty()) return {};
+        if (rgbData.empty()) {
+            LOGF("❌ Preprocessing failed - empty RGB data");
+            return {};
+        }
+        LOGF("✅ Preprocessing complete: %dx%d", processedWidth, processedHeight);
         
         // Create ONNX tensor from preprocessed image
+        LOGF("🧮 Creating tensor from RGB data...");
         auto inputTensor = createTensorFromRGB(rgbData, processedWidth, processedHeight);
-        if (inputTensor.empty()) return {};
+        if (inputTensor.empty()) {
+            LOGF("❌ Tensor creation failed");
+            return {};
+        }
+        LOGF("✅ Tensor created: %zu elements", inputTensor.size());
+        preprocessTimer.logElapsed("YUV→RGB→Rotate→Pad→Tensor");
         
-        // Run inference and return result
-        return runInference(inputTensor, enabledCodeTypesMask);
+        // PHASE 2: ONNX Inference
+        LOGF("🧠 Starting ONNX inference phase...");
+        PerformanceTimer inferenceTimer("INFERENCE");
+        auto result = runInference(inputTensor, enabledCodeTypesMask);
+        inferenceTimer.logElapsed("ONNX_MODEL_EXECUTION");
+        LOGF("✅ ONNX inference complete");
+        
+        // Log total frame processing time with execution provider info
+        totalTimer.logElapsed("COMPLETE_PIPELINE");
+        LOGF("🚀 Frame processed using %s (%.2f ms total)", 
+             getExecutionProviderName(), totalTimer.getElapsedMs());
+        
+        // Check if frame processing is too slow for real-time
+        if (totalTimer.isSlowOperation()) {
+            LOGF("⚠️ SLOW FRAME: %.2f ms (target: <33ms for 30 FPS) with %s", 
+                 totalTimer.getElapsedMs(), getExecutionProviderName());
+        }
+        
+        return result;
         
     } catch (const Ort::Exception& e) {
-        LOGF("ONNX inference error: %s", e.what());
+        LOGF("❌ ONNX inference error: %s", e.what());
         return {}; // NO FALLBACK MOCKING
+    } catch (const std::exception& e) {
+        LOGF("❌ Standard exception in processFrame: %s", e.what());
+        return {};
+    } catch (...) {
+        LOGF("❌ Unknown exception in processFrame");
+        return {};
     }
 }
 
@@ -169,11 +337,11 @@ std::vector<uint8_t> OnnxProcessor::preprocessFrame(const uint8_t* frameData, si
     // Step 1: Resize YUV for performance optimization
     int targetWidth, targetHeight;
     if (width > height) {
-        targetWidth = 640;
-        targetHeight = (height * 640) / width;
+        targetWidth = modelSize_;
+        targetHeight = (height * modelSize_) / width;
     } else {
-        targetHeight = 640;
-        targetWidth = (width * 640) / height;
+        targetHeight = modelSize_;
+        targetWidth = (width * modelSize_) / height;
     }
     
     // Ensure even dimensions for YUV 4:2:0 format
@@ -239,9 +407,9 @@ std::vector<uint8_t> OnnxProcessor::preprocessFrame(const uint8_t* frameData, si
 std::vector<float> OnnxProcessor::createTensorFromRGB(const std::vector<uint8_t>& rgbData, int width, int height) {
     LOGF("Creating tensor from RGB data (%dx%d)", width, height);
     
-    // Apply white padding to make it square 640x640
+    // Apply white padding to make it square based on model size
     UniversalScanner::PaddingInfo padInfo;
-    auto inputTensor = UniversalScanner::WhitePadding::applyPadding(rgbData, width, height, 640, &padInfo);
+    auto inputTensor = UniversalScanner::WhitePadding::applyPadding(rgbData, width, height, modelSize_, &padInfo);
     
     if (inputTensor.empty()) {
         LOGF("ERROR: White padding failed");
@@ -249,17 +417,20 @@ std::vector<float> OnnxProcessor::createTensorFromRGB(const std::vector<uint8_t>
     }
     
     if (enableDebugImages) {
-        UniversalScanner::ImageDebugger::saveTensor("3_padded.jpg", inputTensor, 640, 640);
+        UniversalScanner::ImageDebugger::saveTensor("3_padded.jpg", inputTensor, modelSize_, modelSize_);
     }
     
-    LOGF("Tensor created: 640x640, first pixels: %.3f %.3f %.3f", 
+    LOGF("Tensor created: %dx%d, first pixels: %.3f %.3f %.3f", modelSize_, modelSize_, 
          inputTensor[0], inputTensor[1], inputTensor[2]);
     
     return inputTensor;
 }
 
 DetectionResult OnnxProcessor::runInference(const std::vector<float>& inputTensor, uint8_t enabledCodeTypesMask) {
-    LOGF("Running ONNX inference");
+    LOGF("🚀 Running ONNX inference with %s provider", getExecutionProviderName());
+    
+    // PHASE 2A: ONNX Model Execution
+    PerformanceTimer onnxTimer("ONNX_EXECUTION");
     
     // Create input tensor
     auto inputTensorOrt = Ort::Value::CreateTensor<float>(
@@ -278,38 +449,80 @@ DetectionResult OnnxProcessor::runInference(const std::vector<float>& inputTenso
     float* outputData = outputTensor.GetTensorMutableData<float>();
     auto outputShape = outputTensor.GetTensorTypeAndShapeInfo().GetShape();
     
-    LOGF("ONNX inference completed, output shape: [%ld, %ld, %ld]", 
+    onnxTimer.logElapsed("MODEL_FORWARD_PASS");
+    
+    LOGF("✅ ONNX inference completed, output shape: [%ld, %ld, %ld]", 
          (long)outputShape[0], (long)outputShape[1], (long)outputShape[2]);
+    
+    // DEBUG: Check some output values to see if model is producing reasonable results
+    LOGF("🔬 First 10 output values: %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f %.6f", 
+         outputData[0], outputData[1], outputData[2], outputData[3], outputData[4],
+         outputData[5], outputData[6], outputData[7], outputData[8], outputData[9]);
+    
+    // Check if all outputs are zeros (sign of a problem)
+    bool allZeros = true;
+    bool allNans = true;
+    for (size_t i = 0; i < 100 && i < (outputShape[1] * outputShape[2]); i++) {
+        if (outputData[i] != 0.0f) allZeros = false;
+        if (!std::isnan(outputData[i])) allNans = false;
+    }
+    
+    if (allZeros) {
+        LOGF("⚠️ WARNING: All output values are zero - model may not be working correctly");
+    }
+    if (allNans) {
+        LOGF("⚠️ WARNING: All output values are NaN - model has serious issues");
+    }
+    
+    // PHASE 2B: Postprocessing (Detection Finding)
+    PerformanceTimer postprocessTimer("POSTPROCESSING");
     
     // Copy to vector for processing
     size_t outputSize = 1;
     for (auto dim : outputShape) outputSize *= dim;
     std::vector<float> output(outputData, outputData + outputSize);
     
-    return findBestDetection(output, enabledCodeTypesMask);
+    auto result = findBestDetection(output, enabledCodeTypesMask);
+    postprocessTimer.logElapsed("DETECTION_FILTERING");
+    
+    return result;
 }
 
 DetectionResult OnnxProcessor::findBestDetection(const std::vector<float>& modelOutput, uint8_t enabledCodeTypesMask) {
-    // Validate output format [1, 9, 8400]
+    DetectionResult result;
+    result.hasDetection = false;
+    result.confidence = 0.0f;
+    
+    // Validate output format based on model size
     const size_t expectedFeatures = 9;
-    const size_t expectedAnchors = 8400;
+    // Calculate expected anchors based on model size
+    const size_t expectedAnchors = (modelSize_ == 320) ? 2100 : (modelSize_ == 416) ? 3549 : 8400;
     
     if (modelOutput.size() != expectedFeatures * expectedAnchors) {
-        LOGF("ERROR: Unexpected output size %zu, expected %zu", modelOutput.size(), expectedFeatures * expectedAnchors);
-        return {};
+        LOGF("❌ ERROR: Unexpected output size %zu, expected %zu (for %dx%d model)", 
+             modelOutput.size(), expectedFeatures * expectedAnchors, modelSize_, modelSize_);
+        return result;
     }
     
-    LOGF("Processing %zu anchors for best detection with enabled types mask: 0x%02X", expectedAnchors, enabledCodeTypesMask);
+    LOGF("🔍 Processing %zu anchors for best detection with enabled types mask: 0x%02X", expectedAnchors, enabledCodeTypesMask);
     
     auto sigmoid = [](float x) { return 1.0f / (1.0f + std::exp(-x)); };
     auto getVal = [&](size_t anchorIdx, size_t featureIdx) -> float {
         return modelOutput[featureIdx * expectedAnchors + anchorIdx];
     };
     
+    // DEBUG: Check first few anchor outputs
+    LOGF("🔬 First anchor sample:");
+    for (int f = 0; f < 9; f++) {
+        LOGF("   Feature %d: %.6f", f, getVal(0, f));
+    }
+    
     // Find best anchor among enabled code detection types only
     size_t bestAnchor = 0;
     float bestConfidence = 0.0f;
     int bestClass = -1;
+    int validAnchors = 0;
+    int highConfidenceAnchors = 0;
     
     for (size_t a = 0; a < expectedAnchors; a++) {
         // Find best class for this anchor among enabled types only
@@ -329,32 +542,57 @@ DetectionResult OnnxProcessor::findBestDetection(const std::vector<float>& model
             }
         }
         
+        if (maxClassProb > 0.1f) validAnchors++;
+        if (maxClassProb > 0.5f) highConfidenceAnchors++;
+        
         if (maxClassProb > bestConfidence && maxClassProb > 0.55f) {
             bestConfidence = maxClassProb;
             bestAnchor = a;
             bestClass = classIdx;
+            
+            // Log promising detections
+            if (maxClassProb > 0.6f) {
+                LOGF("🎯 High confidence anchor %zu: class=%d, conf=%.3f, bbox=(%.3f,%.3f,%.3f,%.3f)", 
+                     a, classIdx, maxClassProb, getVal(a, 0), getVal(a, 1), getVal(a, 2), getVal(a, 3));
+            }
         }
     }
     
-    // Create result
-    DetectionResult result;
+    LOGF("📊 Detection stats: %d valid (>0.1), %d high-conf (>0.5), %d passed threshold (>0.55)", 
+         validAnchors, highConfidenceAnchors, (bestConfidence > 0.0f ? 1 : 0));
+    
+    // We already initialized result at the beginning with hasDetection = false
     if (bestConfidence > 0.0f) {
+        result.hasDetection = true;
         result.confidence = bestConfidence;
-        result.centerX = getVal(bestAnchor, 0) / 640.0f;    // Normalize to [0,1]
-        result.centerY = getVal(bestAnchor, 1) / 640.0f;    // Normalize to [0,1]
-        result.width = getVal(bestAnchor, 2) / 640.0f;      // Normalize to [0,1]
-        result.height = getVal(bestAnchor, 3) / 640.0f;     // Normalize to [0,1]
+        result.centerX = getVal(bestAnchor, 0) / static_cast<float>(modelSize_);    // Normalize to [0,1]
+        result.centerY = getVal(bestAnchor, 1) / static_cast<float>(modelSize_);    // Normalize to [0,1]
+        result.width = getVal(bestAnchor, 2) / static_cast<float>(modelSize_);      // Normalize to [0,1]
+        result.height = getVal(bestAnchor, 3) / static_cast<float>(modelSize_);     // Normalize to [0,1]
         result.classIndex = bestClass;
         
         CodeDetectionType detectionType = indexToCodeDetectionType(bestClass);
-        LOGF("Best detection: class=%d (%s), conf=%.3f, coords=(%.3f,%.3f) size=%.3fx%.3f", 
+        LOGF("✅ Best detection: class=%d (%s), conf=%.3f, coords=(%.3f,%.3f) size=%.3fx%.3f", 
              result.classIndex, getCodeDetectionClassName(detectionType), result.confidence, 
              result.centerX, result.centerY, result.width, result.height);
     } else {
-        LOGF("No detection found above threshold for enabled types mask: 0x%02X", enabledCodeTypesMask);
+        LOGF("❌ No detection found above threshold 0.55 for enabled types mask: 0x%02X", enabledCodeTypesMask);
+        LOGF("💡 Best found was: conf=%.3f (anchor %zu)", bestConfidence, bestAnchor);
     }
     
     return result;
+}
+
+void OnnxProcessor::setModelSize(int size) {
+    if (size != modelSize_) {
+        LOGF("Model size changing from %d to %d, will reload model", modelSize_, size);
+        modelSize_ = size;
+        // Force model reload on next frame
+        modelLoaded = false;
+        // Reset session to free memory
+        session.reset();
+        ortEnv.reset();
+    }
 }
 
 } // namespace UniversalScanner

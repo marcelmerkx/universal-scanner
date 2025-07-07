@@ -19,6 +19,7 @@
 #include "preprocessing/WhitePadding.h"
 #include "preprocessing/ImageDebugger.h"
 #include "OnnxProcessor.h"
+#include "TfliteProcessor.h"
 #include "CodeDetectionConstants.h"
 
 #define LOGF(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "UniversalNative", fmt, ##__VA_ARGS__)
@@ -560,8 +561,26 @@ public:
     }
 };
 
-// Global processor instance
+// Global processor instances
 static std::unique_ptr<UniversalScanner::OnnxProcessor> g_onnxProcessor = nullptr;
+// TFLite processor for A/B testing
+static std::unique_ptr<UniversalScanner::TfliteProcessor> g_tfliteProcessor = nullptr;
+// Debug: raw pointer for testing
+static UniversalScanner::TfliteProcessor* g_tfliteProcessorRaw = nullptr;
+// Global Android context for asset loading
+static jobject g_androidContext = nullptr;
+
+// Test function to verify TFLite linkage
+extern "C" JNIEXPORT void JNICALL
+Java_com_universal_UniversalNativeModule_testTflite(JNIEnv* env, jobject /* this */) {
+    LOGF("🧪 Testing TFLite linkage...");
+    try {
+        const char* version = TfLiteVersion();
+        LOGF("✅ TFLite version: %s", version ? version : "null");
+    } catch (...) {
+        LOGF("❌ TfLiteVersion() failed");
+    }
+}
 
 class UniversalNativeModule : public HybridClass<UniversalNativeModule> {
 public:
@@ -576,20 +595,17 @@ public:
             makeNativeMethod("initHybrid", UniversalNativeModule::initHybrid),
             makeNativeMethod("nativeProcessFrameWithData", UniversalNativeModule::nativeProcessFrameWithData),
             makeNativeMethod("setDebugImages", UniversalNativeModule::setDebugImages),
+            makeNativeMethod("setModelSize", UniversalNativeModule::setModelSize),
         });
     }
     
     // Native method that processes real frame data from VisionCamera
-    local_ref<jstring> nativeProcessFrameWithData(int width, int height, alias_ref<jbyteArray> frameData, int enabledTypesMask) {
-        LOGF("nativeProcessFrameWithData called with %dx%d, frame data size: %zu, enabled types mask: 0x%02X", 
-             width, height, frameData->size(), enabledTypesMask);
+    local_ref<jstring> nativeProcessFrameWithData(int width, int height, alias_ref<jbyteArray> frameData, int enabledTypesMask, bool useTflite) {
+        LOGF("nativeProcessFrameWithData called with %dx%d, frame data size: %zu, enabled types mask: 0x%02X, useTflite: %s", 
+             width, height, frameData->size(), enabledTypesMask, useTflite ? "true" : "false");
+        
         
         try {
-            // Initialize processor if needed
-            if (!g_onnxProcessor) {
-                g_onnxProcessor = std::make_unique<UniversalScanner::OnnxProcessor>();
-            }
-            
             // Get JNI environment
             JNIEnv* jniEnv = facebook::jni::Environment::current();
             
@@ -600,18 +616,74 @@ public:
             
             LOGF("Processing REAL VisionCamera frame: %dx%d, %d bytes", width, height, dataSize);
             
-            // Call the real ONNX processing with actual frame data
-            UniversalScanner::DetectionResult result = g_onnxProcessor->processFrame(
-                width, height, jniEnv, nullptr, frameBytes, dataSize, static_cast<uint8_t>(enabledTypesMask)
-            );
+            UniversalScanner::DetectionResult result;
+            
+            if (useTflite) {
+                // Use TFLite processor
+                try {
+                    if (!g_tfliteProcessor) {
+                        LOGF("🏗️ Creating new TfliteProcessor instance...");
+                        try {
+                            g_tfliteProcessor = std::make_unique<UniversalScanner::TfliteProcessor>();
+                            g_tfliteProcessorRaw = g_tfliteProcessor.get();
+                            if (!g_tfliteProcessor) {
+                                LOGF("❌ Failed to create TfliteProcessor - null pointer");
+                                result.hasDetection = false;
+                                result.confidence = 0.0f;
+                            } else {
+                                LOGF("✅ TfliteProcessor created successfully at %p", g_tfliteProcessor.get());
+                            }
+                        } catch (const std::exception& e) {
+                            LOGF("❌ Exception creating TfliteProcessor: %s", e.what());
+                            result.hasDetection = false;
+                            result.confidence = 0.0f;
+                        }
+                    }
+                    
+                    if (g_tfliteProcessor) {
+                        LOGF("📞 Calling g_tfliteProcessor->processFrame at %p...", g_tfliteProcessor.get());
+                        result = g_tfliteProcessor->processFrame(
+                            width, height, jniEnv, nullptr, frameBytes, dataSize, static_cast<uint8_t>(enabledTypesMask)
+                        );
+                        LOGF("📞 TfliteProcessor::processFrame returned - hasDetection=%s, conf=%.3f", 
+                             result.hasDetection ? "true" : "false", result.confidence);
+                    } else {
+                        LOGF("❌ g_tfliteProcessor is null, cannot process frame");
+                        result.hasDetection = false;
+                        result.confidence = 0.0f;
+                    }
+                } catch (const std::exception& e) {
+                    LOGF("❌ TFLite processor exception: %s", e.what());
+                    result.hasDetection = false;
+                    result.confidence = 0.0f;
+                } catch (...) {
+                    LOGF("❌ TFLite processor unknown exception");
+                    result.hasDetection = false;
+                    result.confidence = 0.0f;
+                }
+            } else {
+                // Use ONNX processor
+                if (!g_onnxProcessor) {
+                    LOGF("🏗️ Creating new OnnxProcessor instance...");
+                    g_onnxProcessor = std::make_unique<UniversalScanner::OnnxProcessor>();
+                    LOGF("✅ OnnxProcessor created successfully");
+                }
+                
+                LOGF("📞 Calling g_onnxProcessor->processFrame...");
+                result = g_onnxProcessor->processFrame(
+                    width, height, jniEnv, g_androidContext, frameBytes, dataSize, static_cast<uint8_t>(enabledTypesMask)
+                );
+                LOGF("📞 OnnxProcessor::processFrame returned");
+            }
             
             // Format results as JSON
-            if (!result.isValid()) {
+            if (!result.hasDetection || !result.isValid()) {
+                LOGF("🚫 No valid detection - returning empty result");
                 return make_jstring("{\"detections\":[]}");
             }
             
             // Structured result with normalized [0,1] coordinates
-            LOGF("Raw results: conf=%.3f, x=%.3f, y=%.3f, w=%.3f, h=%.3f, class=%d (%s)", 
+            LOGF("✨ Raw results: conf=%.3f, x=%.3f, y=%.3f, w=%.3f, h=%.3f, class=%d (%s)", 
                  result.confidence, result.centerX, result.centerY, result.width, result.height, 
                  result.classIndex, getClassName(result.classIndex));
             
@@ -620,15 +692,18 @@ public:
             LOGF("Normalized coords from ONNX: x=%.3f, y=%.3f, w=%.3f, h=%.3f", 
                  result.centerX, result.centerY, result.width, result.height);
             
-            int pixelX = (int)(result.centerX * 640);   // Convert normalized center X to pixels in 640x640 ONNX space
-            int pixelY = (int)(result.centerY * 640);   // Convert normalized center Y to pixels in 640x640 ONNX space  
-            int pixelW = (int)(result.width * 640);     // Convert normalized width to pixels in 640x640 ONNX space
-            int pixelH = (int)(result.height * 640);    // Convert normalized height to pixels in 640x640 ONNX space
+            // Get actual model size for coordinate conversion
+            int modelSize = g_onnxProcessor ? g_onnxProcessor->getModelSize() : 640;
             
-            LOGF("Converted to 640x640 pixels: x=%d, y=%d, w=%d, h=%d", 
-                 pixelX, pixelY, pixelW, pixelH);
-            LOGF("These coordinates are in PADDED 640x640 space with 90° CCW rotation applied");
-            LOGF("Original camera was 640x480 -> rotated to 480x640 -> padded to 640x640");
+            int pixelX = (int)(result.centerX * modelSize);   // Convert normalized center X to pixels in model space
+            int pixelY = (int)(result.centerY * modelSize);   // Convert normalized center Y to pixels in model space  
+            int pixelW = (int)(result.width * modelSize);     // Convert normalized width to pixels in model space
+            int pixelH = (int)(result.height * modelSize);    // Convert normalized height to pixels in model space
+            
+            LOGF("Converted to %dx%d pixels: x=%d, y=%d, w=%d, h=%d", 
+                 modelSize, modelSize, pixelX, pixelY, pixelW, pixelH);
+            LOGF("These coordinates are in PADDED %dx%d space with 90° CCW rotation applied", modelSize, modelSize);
+            LOGF("Original camera was 640x480 -> rotated to 480x640 -> padded to %dx%d", modelSize, modelSize);
             
             std::string json = "{\"detections\":[{";
             json += "\"type\":\"" + std::string(getClassName(result.classIndex)) + "\",";
@@ -637,7 +712,15 @@ public:
             json += "\"y\":" + std::to_string(pixelY) + ",";
             json += "\"width\":" + std::to_string(pixelW) + ",";
             json += "\"height\":" + std::to_string(pixelH) + ",";
-            json += "\"model\":\"unified-detection-v7.onnx\"";
+            // Get the actual model name with size
+            std::string modelName;
+            if (useTflite) {
+                modelName = "unified-detection-v7.tflite";
+            } else {
+                int modelSize = g_onnxProcessor ? g_onnxProcessor->getModelSize() : 640;
+                modelName = "unified-detection-v7-" + std::to_string(modelSize) + ".onnx";
+            }
+            json += "\"model\":\"" + modelName + "\"";
             json += "}]}";
             
             return make_jstring(json);
@@ -652,13 +735,30 @@ public:
     void setDebugImages(bool enabled) {
         LOGF("setDebugImages called: %s", enabled ? "enabled" : "disabled");
         
-        // Initialize processor if needed
+        // Initialize processors if needed
+        if (!g_onnxProcessor) {
+            g_onnxProcessor = std::make_unique<UniversalScanner::OnnxProcessor>();
+        }
+        if (!g_tfliteProcessor) {
+            g_tfliteProcessor = std::make_unique<UniversalScanner::TfliteProcessor>();
+        }
+        
+        g_onnxProcessor->setDebugImages(enabled);
+        g_tfliteProcessor->setDebugImages(enabled);
+    }
+    
+    // Set model size for ONNX
+    void setModelSize(int size) {
+        LOGF("setModelSize called: %d", size);
+        
+        // Initialize ONNX processor if needed
         if (!g_onnxProcessor) {
             g_onnxProcessor = std::make_unique<UniversalScanner::OnnxProcessor>();
         }
         
-        g_onnxProcessor->setDebugImages(enabled);
+        g_onnxProcessor->setModelSize(size);
     }
+    
 };
 
 } // namespace universal

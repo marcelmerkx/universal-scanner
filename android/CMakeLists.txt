@@ -96,6 +96,7 @@ add_library(
   SHARED
   ../cpp/Universal.cpp
   ../cpp/OnnxProcessor.cpp
+  ../cpp/TfliteProcessor.cpp
   ../cpp/CodeDetectionConstants.cpp
   ../cpp/platform/YuvConverter.cpp
   ../cpp/platform/AndroidYuvConverter.cpp
@@ -112,6 +113,7 @@ target_include_directories(
   "../cpp"
   "src/main/cpp"
   "src/main/cpp/lib/onnxruntime/headers"
+  "src/main/cpp/lib/litert/headers"
   "src/main/cpp/lib/stb"
 )
 
@@ -127,4 +129,6 @@ target_link_libraries(
   log
   fbjni::fbjni
   ${ONNXRUNTIME}
+  ${TFLITE}
+  ${TFLITE_GPU}
 )

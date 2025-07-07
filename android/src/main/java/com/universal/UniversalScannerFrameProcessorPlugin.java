@@ -46,24 +46,76 @@ public class UniversalScannerFrameProcessorPlugin extends FrameProcessorPlugin {
     
     private void extractModelFromAssets() {
         try {
-            // Extract unified-detection-v7.onnx from assets to internal storage
-            java.io.InputStream is = appContext.getAssets().open("unified-detection-v7.onnx");
-            java.io.File outputFile = new java.io.File(appContext.getFilesDir(), "unified-detection-v7.onnx");
-            
-            java.io.OutputStream os = new java.io.FileOutputStream(outputFile);
-            byte[] buffer = new byte[1024];
-            int length;
-            while ((length = is.read(buffer)) > 0) {
-                os.write(buffer, 0, length);
-            }
-            os.close();
-            is.close();
+            // Extract ONNX models only (TFLite not needed for now)
+            extractOnnxModels();
             
             modelExtracted = true;
-            Log.i(TAG, "Model extracted to: " + outputFile.getAbsolutePath());
         } catch (Exception e) {
-            Log.e(TAG, "Failed to extract model from assets", e);
+            Log.e(TAG, "Failed to extract models from assets", e);
         }
+    }
+    
+    private void extractOnnxModels() {
+        try {
+            // Try to extract NNAPI-compatible model first
+            java.io.InputStream is = null;
+            java.io.File outputFile = null;
+            String modelName = null;
+            
+            try {
+                // Try NNAPI-compatible model first
+                is = appContext.getAssets().open("unified-detection-v7-nnapi.onnx");
+                outputFile = new java.io.File(appContext.getFilesDir(), "unified-detection-v7-nnapi.onnx");
+                modelName = "unified-detection-v7-nnapi.onnx";
+                Log.i(TAG, "Found NNAPI-compatible ONNX model in assets");
+            } catch (Exception e) {
+                Log.w(TAG, "NNAPI ONNX model not found, falling back to original model");
+                try {
+                    // Fallback to original model
+                    is = appContext.getAssets().open("unified-detection-v7.onnx");
+                    outputFile = new java.io.File(appContext.getFilesDir(), "unified-detection-v7.onnx");
+                    modelName = "unified-detection-v7.onnx";
+                } catch (Exception e2) {
+                    Log.e(TAG, "No ONNX model found in assets", e2);
+                    return;
+                }
+            }
+            
+            copyStreamToFile(is, outputFile);
+            Log.i(TAG, "ONNX model extracted to: " + outputFile.getAbsolutePath());
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to extract ONNX model from assets", e);
+        }
+    }
+    
+    private void extractTfliteModels() {
+        // Extract TFLite models for A/B testing
+        String[] tfliteModels = {
+            "unified-detection-v7_int8.tflite",
+            "unified-detection-v7_float16.tflite"
+        };
+        
+        for (String modelName : tfliteModels) {
+            try {
+                java.io.InputStream is = appContext.getAssets().open(modelName);
+                java.io.File outputFile = new java.io.File(appContext.getFilesDir(), modelName);
+                copyStreamToFile(is, outputFile);
+                Log.i(TAG, "TFLite model extracted: " + outputFile.getAbsolutePath());
+            } catch (Exception e) {
+                Log.w(TAG, "TFLite model not found: " + modelName);
+            }
+        }
+    }
+    
+    private void copyStreamToFile(java.io.InputStream is, java.io.File outputFile) throws Exception {
+        java.io.OutputStream os = new java.io.FileOutputStream(outputFile);
+        byte[] buffer = new byte[1024];
+        int length;
+        while ((length = is.read(buffer)) > 0) {
+            os.write(buffer, 0, length);
+        }
+        os.close();
+        is.close();
     }
 
     @Override
@@ -92,6 +144,20 @@ public class UniversalScannerFrameProcessorPlugin extends FrameProcessorPlugin {
                     boolean debugImages = (Boolean) arguments.get("debugImages");
                     nativeModule.setDebugImages(debugImages);
                     Log.i(TAG, "Debug images " + (debugImages ? "enabled" : "disabled"));
+                }
+                
+                // Handle useTflite argument for A/B testing
+                boolean useTflite = false;
+                if (arguments != null && arguments.containsKey("useTflite")) {
+                    useTflite = (Boolean) arguments.get("useTflite");
+                    Log.i(TAG, "Model backend: " + (useTflite ? "TFLite" : "ONNX"));
+                }
+                
+                // Handle modelSize argument
+                int modelSize = 640; // Default
+                if (arguments != null && arguments.containsKey("modelSize")) {
+                    modelSize = ((Number) arguments.get("modelSize")).intValue();
+                    Log.i(TAG, "Model size: " + modelSize + "x" + modelSize);
                 }
                 
                 // Handle enabledTypes argument and convert to bitmask
@@ -125,8 +191,11 @@ public class UniversalScannerFrameProcessorPlugin extends FrameProcessorPlugin {
                 
                 Log.i(TAG, "Extracted frame data: " + frameData.length + " bytes (Y:" + ySize + " U:" + uSize + " V:" + vSize + ")");
                 
+                // Set model size before processing
+                nativeModule.setModelSize(modelSize);
+                
                 // Call native processing with real frame data
-                String jsonResult = nativeModule.nativeProcessFrameWithData(width, height, frameData, enabledTypesMask);
+                String jsonResult = nativeModule.nativeProcessFrameWithData(width, height, frameData, enabledTypesMask, useTflite);
                 Log.i(TAG, "Native result: " + jsonResult);
                 
                 // Parse JSON result and convert to expected format
