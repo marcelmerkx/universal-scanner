@@ -79,3 +79,4 @@ android/src/main/cpp/lib
 detection/notebooks/runs/*
 detection/notebooks/Unified-detection-*
 debug_images/*
+android/src/main/assets/*
