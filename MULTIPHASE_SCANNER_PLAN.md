@@ -134,7 +134,7 @@ See: `/ContainerCameraApp/android/app/src/main/java/com/cargosnap/app/YoloBridge
 
 1. ✅ Document this finding (this file)
 2. ✅ Update project memory 
-3. 🔄 Restore confidence threshold to 0.5 (50%)
+3. 🔄 Restore confidence threshold to >0.5 (>50%)
 4. 🔄 Implement correct ONNX output parsing
 5. 🔄 Test with corrected implementation
 

@@ -31,23 +31,22 @@ export default function App(): React.ReactNode {
   const device = useCameraDevice('back')
 
   // from https://www.kaggle.com/models/tensorflow/efficientdet/frameworks/tfLite
-  const model = useTensorflowModel(require('../assets/efficientdet.tflite'))
-  const actualModel = model.state === 'loaded' ? model.model : undefined
+  // const model = useTensorflowModel(require('../assets/efficientdet.tflite')) // TFLite removed
+  // const actualModel = model.state === 'loaded' ? model.model : undefined
 
-  React.useEffect(() => {
-    if (actualModel == null) return
-    console.log(`Model loaded! Shape:\n${modelToString(actualModel)}]`)
-  }, [actualModel])
+  // React.useEffect(() => {
+  //   if (actualModel == null) return
+  //   console.log(`Model loaded! Shape:\n${modelToString(actualModel)}]`)
+  // }, [actualModel])
 
   const { resize } = useResizePlugin()
 
   const frameProcessor = useFrameProcessor(
     (frame) => {
       'worklet'
-      if (actualModel == null) {
-        // model is still loading...
-        return
-      }
+      // TFLite model removed - this app no longer works
+      console.log('TFLite model removed - use SwitchableApp or ModelComparisonApp instead')
+      return
 
       console.log(`Running inference on ${frame}`)
       const resized = resize(frame, {
@@ -69,7 +68,7 @@ export default function App(): React.ReactNode {
     requestPermission()
   }, [requestPermission])
 
-  console.log(`Model: ${model.state} (${model.model != null})`)
+  // console.log(`Model: ${model.state} (${model.model != null})`) // TFLite removed
 
   return (
     <View style={styles.container}>
@@ -85,13 +84,10 @@ export default function App(): React.ReactNode {
         <Text>No Camera available.</Text>
       )}
 
-      {model.state === 'loading' && (
-        <ActivityIndicator size="small" color="white" />
-      )}
-
-      {model.state === 'error' && (
-        <Text>Failed to load model! {model.error.message}</Text>
-      )}
+      <View style={{ position: 'absolute', top: 100, left: 20, backgroundColor: 'rgba(255,0,0,0.8)', padding: 10, borderRadius: 5 }}>
+        <Text style={{ color: 'white', fontWeight: 'bold' }}>TFLite Removed</Text>
+        <Text style={{ color: 'white', fontSize: 12 }}>Use SwitchableApp instead</Text>
+      </View>
     </View>
   )
 }

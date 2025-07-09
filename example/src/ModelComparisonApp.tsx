@@ -24,10 +24,17 @@ interface Detection {
   width: number
   height: number
   model: string
+  value?: string
 }
 
 interface DetectionResult {
   detections?: Detection[]
+  ocr_results?: Array<{
+    type: string
+    value: string
+    confidence: number
+    model: string
+  }>
   error?: string
 }
 
@@ -61,6 +68,7 @@ const AnimatedBoundingBox: React.FC<AnimatedBoundingBoxProps> = ({
     ]}>
       <Text style={styles.boundingBoxLabel}>
         {detection.type.replace('code_', '')}: {(Number(detection.confidence) * 100).toFixed(0)}%
+        {detection.value ? ` - ${detection.value}` : ''}
       </Text>
     </View>
   )
@@ -110,8 +118,8 @@ export default function ModelComparisonApp(): React.ReactNode {
     }
   }, [format])
   
-  // Load models for JavaScript processing
-  const tfliteModel = useTensorflowModel(require('../assets/unified-detection-v7_float32.tflite'))
+  // Load models for JavaScript processing - TFLite removed, ONNX runs natively
+  // const tfliteModel = useTensorflowModel(require('../assets/unified-detection-v7_float32.tflite'))
   // const onnxModel = useOnnxModel(require('../assets/unified-detection-v7.onnx'), 'cpu')
   const { resize } = useResizePlugin()
   
@@ -273,11 +281,11 @@ export default function ModelComparisonApp(): React.ReactNode {
         
         const result = universalScanner.call(frame, {
           enabledTypes: [
-            CODE_DETECTION_TYPES.QR_BARCODE, 
+            // CODE_DETECTION_TYPES.QR_BARCODE, 
             CODE_DETECTION_TYPES.CONTAINER_H, 
             CODE_DETECTION_TYPES.CONTAINER_V, 
-            CODE_DETECTION_TYPES.LICENSE_PLATE,
-            CODE_DETECTION_TYPES.SEAL
+            // CODE_DETECTION_TYPES.LICENSE_PLATE,
+            // CODE_DETECTION_TYPES.SEAL
           ],
           debugImages: debugImages,
           modelSize: modelSize, // Pass model size to native
@@ -286,6 +294,19 @@ export default function ModelComparisonApp(): React.ReactNode {
         if (result?.error) {
           console.error('Scanner error:', result.error)
         } else if (result?.detections && result.detections.length > 0) {
+          // Merge OCR results with detections
+          if (result.ocr_results && result.ocr_results.length > 0) {
+            console.log('OCR Results:', result.ocr_results)
+            // For now, just add the first OCR result to the first detection
+            // In a real app, you'd match by type or position
+            result.detections.forEach((detection, idx) => {
+              const ocrResult = result.ocr_results?.find(ocr => ocr.type === detection.type)
+              if (ocrResult) {
+                detection.value = ocrResult.value
+                console.log(`Merged OCR value "${ocrResult.value}" into detection of type ${detection.type}`)
+              }
+            })
+          }
           const inferenceMs = Date.now() - startTime
           onScanResult(result, inferenceMs)
         }
@@ -383,7 +404,12 @@ export default function ModelComparisonApp(): React.ReactNode {
     
     return (
       <View style={styles.resultContainer}>
-        <Text style={styles.resultTitle}>Detections: {lastResult.detections?.length || 0}</Text>
+        <Text style={styles.resultTitle}>
+          Detections: {lastResult.detections?.length || 0}
+          {lastResult.detections && lastResult.detections[0]?.value && (
+            <Text style={styles.ocrInline}> • OCR: {lastResult.detections[0].value}</Text>
+          )}
+        </Text>
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           {lastResult.detections && lastResult.detections.map((detection: any, index: number) => (
             <View key={index} style={styles.detection}>
@@ -419,9 +445,6 @@ export default function ModelComparisonApp(): React.ReactNode {
             <Text style={styles.title}>
               Native ONNX ({modelSize}x{modelSize})
             </Text>
-            <Text style={styles.subtitle}>
-              Real-time object detection with bounding boxes
-            </Text>
             <View style={styles.buttonContainer}>
               <TouchableOpacity 
                 style={styles.debugButton} 
@@ -431,30 +454,30 @@ export default function ModelComparisonApp(): React.ReactNode {
                   Debug Images: {debugImages ? 'ON' : 'OFF'}
                 </Text>
               </TouchableOpacity>
-              <TouchableOpacity 
+              {/* <TouchableOpacity 
                 style={[styles.debugButton, modelSize === 320 && styles.activeButton]} 
                 onPress={() => setModelSize(320)}
               >
                 <Text style={styles.debugButtonText}>
                   320x320
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
+              </TouchableOpacity> */}
+              {/* <TouchableOpacity 
                 style={[styles.debugButton, modelSize === 416 && styles.activeButton]} 
                 onPress={() => setModelSize(416)}
               >
                 <Text style={styles.debugButtonText}>
                   416x416
                 </Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
+              </TouchableOpacity> */}
+              {/* <TouchableOpacity 
                 style={[styles.debugButton, modelSize === 640 && styles.activeButton]} 
                 onPress={() => setModelSize(640)}
               >
                 <Text style={styles.debugButtonText}>
                   640x640
                 </Text>
-              </TouchableOpacity>
+              </TouchableOpacity> */}
             </View>
             {renderResult()}
           </View>
@@ -590,6 +613,16 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'white',
     marginTop: 1,
+  },
+  ocrValue: {
+    fontSize: 12,
+    color: '#00FF00',
+    fontWeight: 'bold',
+    marginTop: 3,
+  },
+  ocrInline: {
+    color: '#00FF00',
+    fontWeight: 'bold',
   },
   buttonContainer: {
     flexDirection: 'row',

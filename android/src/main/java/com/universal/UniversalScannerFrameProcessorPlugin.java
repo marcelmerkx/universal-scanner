@@ -82,9 +82,20 @@ public class UniversalScannerFrameProcessorPlugin extends FrameProcessorPlugin {
             }
             
             copyStreamToFile(is, outputFile);
-            Log.i(TAG, "ONNX model extracted to: " + outputFile.getAbsolutePath());
+            Log.i(TAG, "ONNX detection model extracted to: " + outputFile.getAbsolutePath());
+            
+            // Extract OCR model
+            try {
+                java.io.InputStream ocrIs = appContext.getAssets().open("best-OCR-Colab-22-06-25.onnx");
+                java.io.File ocrOutputFile = new java.io.File(appContext.getFilesDir(), "best-OCR-Colab-22-06-25.onnx");
+                copyStreamToFile(ocrIs, ocrOutputFile);
+                Log.i(TAG, "OCR model extracted to: " + ocrOutputFile.getAbsolutePath());
+            } catch (Exception ocrE) {
+                Log.w(TAG, "OCR model not found in assets", ocrE);
+            }
+            
         } catch (Exception e) {
-            Log.e(TAG, "Failed to extract ONNX model from assets", e);
+            Log.e(TAG, "Failed to extract ONNX models from assets", e);
         }
     }
     
@@ -208,8 +219,9 @@ public class UniversalScannerFrameProcessorPlugin extends FrameProcessorPlugin {
                 
                 // Convert JSON to Java Map format expected by the UI
                 Map<String, Object> result = new HashMap<>();
-                List<Map<String, Object>> detections = new ArrayList<>();
                 
+                // Process detections array (Stage 1 - for bounding boxes)
+                List<Map<String, Object>> detections = new ArrayList<>();
                 if (jsonObj.has("detections")) {
                     JSONArray detectionsArray = jsonObj.getJSONArray("detections");
                     
@@ -219,18 +231,39 @@ public class UniversalScannerFrameProcessorPlugin extends FrameProcessorPlugin {
                         Map<String, Object> detectionMap = new HashMap<>();
                         detectionMap.put("type", detection.getString("type"));
                         detectionMap.put("confidence", detection.getDouble("confidence"));
-                        detectionMap.put("width", detection.getInt("width"));
-                        detectionMap.put("height", detection.getInt("height"));
+                        detectionMap.put("model", detection.getString("model"));
+                        
+                        // Flat structure for ModelComparisonApp compatibility
                         detectionMap.put("x", detection.getInt("x"));
                         detectionMap.put("y", detection.getInt("y"));
-                        detectionMap.put("model", detection.getString("model"));
+                        detectionMap.put("width", detection.getInt("width"));
+                        detectionMap.put("height", detection.getInt("height"));
                         
                         detections.add(detectionMap);
                     }
                 }
                 
+                // Process ocr_results array (Stage 2 - for extracted text)
+                List<Map<String, Object>> ocrResults = new ArrayList<>();
+                if (jsonObj.has("ocr_results")) {
+                    JSONArray ocrArray = jsonObj.getJSONArray("ocr_results");
+                    
+                    for (int i = 0; i < ocrArray.length(); i++) {
+                        JSONObject ocr = ocrArray.getJSONObject(i);
+                        
+                        Map<String, Object> ocrMap = new HashMap<>();
+                        ocrMap.put("type", ocr.getString("type"));
+                        ocrMap.put("value", ocr.getString("value"));
+                        ocrMap.put("confidence", ocr.getDouble("confidence"));
+                        ocrMap.put("model", ocr.getString("model"));
+                        
+                        ocrResults.add(ocrMap);
+                    }
+                }
+                
                 result.put("detections", detections);
-                Log.i(TAG, "Returning " + detections.size() + " detections from native processing");
+                result.put("ocr_results", ocrResults);
+                Log.i(TAG, "Returning " + detections.size() + " detections and " + ocrResults.size() + " OCR results from native processing");
                 
                 return result;
                 

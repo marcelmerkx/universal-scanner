@@ -33,6 +33,8 @@ find_library(
   NO_CMAKE_FIND_ROOT_PATH
 )
 
+# Note: Using existing image processing utilities instead of OpenCV
+
 string(APPEND CMAKE_CXX_FLAGS " -DANDROID")
 
 add_library(
@@ -96,7 +98,7 @@ add_library(
   SHARED
   ../cpp/Universal.cpp
   ../cpp/OnnxProcessor.cpp
-  ../cpp/TfliteProcessor.cpp
+  ../cpp/OnnxProcessorV2.cpp
   ../cpp/CodeDetectionConstants.cpp
   ../cpp/platform/YuvConverter.cpp
   ../cpp/platform/AndroidYuvConverter.cpp
@@ -105,6 +107,10 @@ add_library(
   ../cpp/preprocessing/ImageRotation.cpp
   ../cpp/preprocessing/WhitePadding.cpp
   ../cpp/preprocessing/ImageDebugger.cpp
+  ../cpp/preprocessing/CropExtractor.cpp
+  ../cpp/preprocessing/AdaptiveLetterbox.cpp
+  ../cpp/ocr/YoloOCREngine.cpp
+  ../cpp/ocr/ContainerOCRProcessor.cpp
 )
 
 target_include_directories(

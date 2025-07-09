@@ -26,8 +26,8 @@ OnnxProcessor::OnnxProcessor()
         enableDebugImages = true;
         LOGF("Debug images enabled (DEBUG build)");
     #else
-        enableDebugImages = false;
-        LOGF("Debug images disabled (RELEASE build)");
+        enableDebugImages = true;  // Force enable for OCR debugging
+        LOGF("Debug images force enabled for OCR debugging");
     #endif
 }
 
@@ -133,9 +133,9 @@ bool OnnxProcessor::initializeModel() {
         try {
             Ort::SessionOptions sessionOptions;
             
-            // Use OnnxDelegateManager to select best execution provider with NNAPI enabled
+            // Use OnnxDelegateManager to select best execution provider - CPU only for investigation
             // Parameters: (sessionOptions, verbose, preferXNNPACK, disableNNAPI)
-            currentExecutionProvider = OnnxDelegateManager::configure(sessionOptions, true, true, false);
+            currentExecutionProvider = OnnxDelegateManager::configure(sessionOptions, true, true, true);
             
             // Create session from memory buffer
             session = std::make_unique<Ort::Session>(*ortEnv, modelData.data(), modelData.size(), sessionOptions);

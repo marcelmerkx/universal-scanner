@@ -33,6 +33,7 @@ interface Detection {
   className: string
   confidence: number
   bbox: { x: number; y: number; w: number; h: number }
+  ocrValue?: string
 }
 
 function tensorToString(tensor: Tensor | OnnxTensor): string {
@@ -61,36 +62,37 @@ export default function SwitchableApp(): React.ReactNode {
   const device = useCameraDevice('back')
 
   // Load both models
-  const tfliteModel = useTensorflowModel(require('../assets/efficientdet.tflite'))
-  const onnxModel = useOnnxModel(require('../assets/unified-detection-v7.onnx'), 'cpu')
+  // const tfliteModel = useTensorflowModel(require('../assets/efficientdet.tflite')) // TFLite removed
+  // const onnxModel = useOnnxModel(require('../assets/unified-detection-v7.onnx'), 'cpu') // ONNX runs natively now
+  const onnxModel = { state: 'loaded', model: null, error: null } // Mock for compatibility
   
-  // Select active model based on mode
+  // Select active model based on mode - TFLite removed
   const isModelLoaded = mode === 'native' 
     ? true // Native mode doesn't need JS model loading - uses shared ONNX session
     : mode === 'tflite' 
-      ? tfliteModel.state === 'loaded'
+      ? false // TFLite mode disabled
       : onnxModel.state === 'loaded'
     
   const actualModel = mode === 'native'
     ? null // Native mode doesn't use JS model
     : mode === 'tflite'
-      ? (tfliteModel.state === 'loaded' ? tfliteModel.model : undefined)
+      ? undefined // TFLite disabled
       : (onnxModel.state === 'loaded' ? onnxModel.model : undefined)
     
   const modelError = mode === 'native'
     ? undefined // Native mode doesn't have JS model errors
     : mode === 'tflite'
-      ? (tfliteModel.state === 'error' ? tfliteModel.error : undefined)
+      ? new Error('TFLite mode removed - use ONNX or Native')
       : (onnxModel.state === 'error' ? onnxModel.error : undefined)
 
   React.useEffect(() => {
     if (actualModel == null) return
-    if (mode === 'tflite' && tfliteModel.state === 'loaded') {
-      console.log(`TFLite Model loaded! Shape:\n${tfliteModelToString(tfliteModel.model)}`)
+    if (mode === 'tflite') {
+      console.log('TFLite mode disabled - use ONNX or Native mode instead')
     } else if (mode === 'onnx' && onnxModel.state === 'loaded') {
       console.log(`ONNX Model loaded! Shape:\n${onnxModelToString(onnxModel.model)}`)
     }
-  }, [actualModel, mode, tfliteModel, onnxModel])
+  }, [actualModel, mode, onnxModel])
 
   const [frameProcessorsAvailable, setFrameProcessorsAvailable] = React.useState(true)
   const [detections, setDetections] = React.useState<Detection[]>([])
@@ -484,6 +486,7 @@ export default function SwitchableApp(): React.ReactNode {
           })
           
           console.log('🚀 Native universalScanner result:', nativeResult)
+          console.log('🔍 Raw result structure:', JSON.stringify(nativeResult, null, 2))
           
           if (nativeResult && nativeResult.results && nativeResult.results.length > 0) {
             // Convert to our Detection format for visualization
@@ -493,9 +496,10 @@ export default function SwitchableApp(): React.ReactNode {
               bbox: {
                 x: result.bbox.x,
                 y: result.bbox.y,
-                w: result.bbox.width,
-                h: result.bbox.height
-              }
+                w: result.bbox.w,
+                h: result.bbox.h
+              },
+              ocrValue: result.value
             }))
             
             console.log(`✅ Native: Found ${detections.length} detections`)
@@ -661,6 +665,7 @@ export default function SwitchableApp(): React.ReactNode {
                 ellipsizeMode="tail"
               >
                 {detection.className.replace('code_', '')} ({(detection.confidence * 100).toFixed(1)}%)
+                {detection.value ? ` - ${detection.value}` : ''}
               </Text>
             </View>
           </View>
@@ -725,6 +730,18 @@ export default function SwitchableApp(): React.ReactNode {
           </Text>
         </View>
       )}
+
+      {/* Detection Status Display */}
+      <View style={styles.statusContainer}>
+        <Text style={styles.statusText}>
+          Detections: {detections.length}
+        </Text>
+        {detections.length > 0 && detections[0].ocrValue && (
+          <Text style={styles.ocrText}>
+            OCR: {detections[0].ocrValue}
+          </Text>
+        )}
+      </View>
     </View>
   )
 }
@@ -834,5 +851,24 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.8)',
     borderRadius: 8,
     backgroundColor: 'transparent',
+  },
+  statusContainer: {
+    position: 'absolute',
+    top: 50,
+    left: 20,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    padding: 10,
+    borderRadius: 5,
+  },
+  statusText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  ocrText: {
+    color: '#00FF00',
+    fontWeight: 'bold',
+    fontSize: 14,
+    marginTop: 5,
   },
 })
