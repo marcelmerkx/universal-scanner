@@ -242,9 +242,18 @@ std::string YoloOCREngine::assembleText(
     std::vector<CharBox>& boxes,
     const std::string& classType
 ) {
-    // Sort by X coordinate (left to right)
-    std::sort(boxes.begin(), boxes.end(),
-        [](const CharBox& a, const CharBox& b) { return a.x < b.x; });
+    // Sort based on code type
+    if (classType == "code_container_v") {
+        // Vertical container: sort by Y coordinate (top to bottom)
+        std::sort(boxes.begin(), boxes.end(),
+            [](const CharBox& a, const CharBox& b) { return a.y < b.y; });
+        LOGD("Sorting characters vertically (top to bottom) for %s", classType.c_str());
+    } else {
+        // Horizontal container and others: sort by X coordinate (left to right)
+        std::sort(boxes.begin(), boxes.end(),
+            [](const CharBox& a, const CharBox& b) { return a.x < b.x; });
+        LOGD("Sorting characters horizontally (left to right) for %s", classType.c_str());
+    }
     
     // For containers: limit to 11 characters (ISO 6346)
     if (classType.find("container") != std::string::npos && boxes.size() > 11) {

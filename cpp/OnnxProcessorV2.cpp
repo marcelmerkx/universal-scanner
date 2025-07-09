@@ -115,8 +115,23 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
     int w_original = static_cast<int>(boxWidth);
     int h_original = static_cast<int>(boxHeight);
     
-    // Add padding: 100px to height (as per spec) plus 20px more (10px top/bottom)
-    h_original += 120;
+    // Add padding: 100px to width (as per spec) plus 20px to height (10px top/bottom)
+    // remember we have not yet rotated, so we need to swap width/height
+    int padding_width = 20;
+    int padding_height = 80;
+    
+    // But first, check how much padding we can actually add without going out of bounds
+    // Calculate how much we can expand in each direction
+    int expand_left = std::min(padding_width / 2, x_original);
+    int expand_right = std::min(padding_width / 2, width - (x_original + w_original));
+    int expand_top = std::min(padding_height / 2, y_original);
+    int expand_bottom = std::min(padding_height / 2, height - (y_original + h_original));
+    
+    // Apply the padding
+    x_original -= expand_left;
+    w_original += expand_left + expand_right;
+    y_original -= expand_top;
+    h_original += expand_top + expand_bottom;
     
     LOGD("📐 Coordinate conversion per spec:");
     LOGD("📐   Input: norm(%.3f,%.3f,%.3f,%.3f)", 
@@ -125,14 +140,23 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
     LOGD("📐   Rotated: (%.3f,%.3f,%.3f,%.3f)",
          rotated_x, rotated_y, rotated_w, rotated_h);
     LOGD("📐   FrameSize: %d (max of %dx%d)", maxFrameDimension, width, height);
-    LOGD("📐   Output: (%d,%d,%d,%d) in frame space",
+    LOGD("📐   Before padding: (%d,%d,%d,%d)",
+         x_original + expand_left, y_original + expand_top, 
+         w_original - expand_left - expand_right, h_original - expand_top - expand_bottom);
+    LOGD("📐   After padding: (%d,%d,%d,%d) in frame space",
          x_original, y_original, w_original, h_original);
     
-    // Clamp to frame bounds
+    // Final safety check - clamp to frame bounds
     x_original = std::max(0, x_original);
     y_original = std::max(0, y_original);
     w_original = std::min(w_original, width - x_original);
     h_original = std::min(h_original, height - y_original);
+    
+    // Ensure dimensions are even for YUV420 format
+    if (w_original % 2 == 1) w_original--;
+    if (h_original % 2 == 1) h_original--;
+    if (x_original % 2 == 1) x_original++;
+    if (y_original % 2 == 1) y_original++;
     
     universalscanner::BoundingBox cropBox;
     cropBox.x = x_original;
@@ -314,9 +338,31 @@ std::vector<uint8_t> OnnxProcessorV2::extractYuvCrop(
     int frameWidth, int frameHeight,
     const universalscanner::BoundingBox& bbox
 ) {
+    // Validate input parameters
+    if (!frameData || frameSize == 0 || bbox.width <= 0 || bbox.height <= 0) {
+        LOGE("Invalid parameters for YUV crop extraction");
+        return std::vector<uint8_t>();
+    }
+    
+    // Ensure crop box is within frame bounds
+    if (bbox.x < 0 || bbox.y < 0 || 
+        bbox.x + bbox.width > frameWidth || 
+        bbox.y + bbox.height > frameHeight) {
+        LOGE("Crop box out of bounds: crop(%d,%d,%d,%d) frame(%d,%d)",
+             bbox.x, bbox.y, bbox.width, bbox.height, frameWidth, frameHeight);
+        return std::vector<uint8_t>();
+    }
+    
     // Extract a crop from YUV420 data
     size_t ySize = frameWidth * frameHeight;
     size_t uvSize = ySize / 4;
+    
+    // Validate frame data size
+    size_t expectedSize = ySize + uvSize * 2;
+    if (frameSize < expectedSize) {
+        LOGE("Frame data too small: %zu < %zu", frameSize, expectedSize);
+        return std::vector<uint8_t>();
+    }
     
     const uint8_t* yPlane = frameData;
     const uint8_t* uPlane = frameData + ySize;

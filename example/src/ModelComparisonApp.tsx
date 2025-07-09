@@ -79,7 +79,7 @@ export default function ModelComparisonApp(): React.ReactNode {
   const device = useCameraDevice('back')
   const [lastResult, setLastResult] = React.useState<any>(null)
   const [fps, setFps] = React.useState(0)
-  const [debugImages, setDebugImages] = React.useState(false)
+  const [debugImages, setDebugImages] = React.useState(true) // Default to true
   const screenDimensions = Dimensions.get('window')
   const [previousDetections, setPreviousDetections] = React.useState<Map<string, any>>(new Map())
   const [modelSize, setModelSize] = React.useState<320 | 416 | 640>(320)
@@ -443,9 +443,10 @@ export default function ModelComparisonApp(): React.ReactNode {
           <View style={styles.overlay}>
             <Text style={styles.fps}>FPS: {fps} | {inferenceTime}ms</Text>
             <Text style={styles.title}>
-              Native ONNX ({modelSize}x{modelSize})
+              Native ONNX ({modelSize}x{modelSize}) • Debug: ON
             </Text>
             <View style={styles.buttonContainer}>
+              {/* Debug button commented out - causes crashes when toggled
               <TouchableOpacity 
                 style={styles.debugButton} 
                 onPress={() => setDebugImages(!debugImages)}
@@ -453,7 +454,7 @@ export default function ModelComparisonApp(): React.ReactNode {
                 <Text style={styles.debugButtonText}>
                   Debug Images: {debugImages ? 'ON' : 'OFF'}
                 </Text>
-              </TouchableOpacity>
+              </TouchableOpacity> */}
               {/* <TouchableOpacity 
                 style={[styles.debugButton, modelSize === 320 && styles.activeButton]} 
                 onPress={() => setModelSize(320)}

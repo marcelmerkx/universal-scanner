@@ -15,7 +15,7 @@ OnnxProcessor::OnnxProcessor()
       modelLoaded(false), 
       modelSize_(320),  // Default to 320 for faster initialization
       yuvConverter(nullptr), 
-      enableDebugImages(false), 
+      enableDebugImages(true),  // Default to true for debugging
       currentExecutionProvider(ExecutionProvider::CPU),
       assetManager_(nullptr),
       env_(nullptr) {

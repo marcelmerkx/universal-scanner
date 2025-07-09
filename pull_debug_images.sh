@@ -1,31 +1,82 @@
 #!/bin/bash
 
-# Script to pull OCR debug images from Android device
+# Script to pull OCR debug images from all Android devices
 
-echo "📸 Pulling OCR debug images from device..."
+echo "📸 Pulling OCR debug images from all devices..."
 
-# Create debug_images directory if it doesn't exist
-mkdir -p debug_images
+# Check for connected devices
+DEVICES=$(adb devices | grep -E "device$|emulator" | cut -f1)
+DEVICE_COUNT=$(echo "$DEVICES" | wc -l | tr -d ' ')
 
-# Clean up old images
-rm -rf debug_images/*
-
-# Pull the entire onnx_debug directory
-adb pull /sdcard/Download/onnx_debug/ debug_images/ 2>/dev/null
-
-# If nested directory was created, move files up
-if [ -d "debug_images/onnx_debug" ]; then
-    mv debug_images/onnx_debug/* debug_images/ 2>/dev/null
-    rmdir debug_images/onnx_debug 2>/dev/null
+if [ "$DEVICE_COUNT" -eq 0 ]; then
+    echo "❌ No devices connected!"
+    exit 1
 fi
 
-echo "✅ Debug images saved to debug_images/"
+# Process each device
+TOTAL_IMAGES=0
+for DEVICE in $DEVICES; do
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📱 Processing device: $DEVICE"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    ADB_CMD="adb -s $DEVICE"
+    
+    # Create device-specific directory
+    OUTPUT_DIR="debug_images/ocr_only_${DEVICE}"
+    mkdir -p "$OUTPUT_DIR"
+    
+    # Clean up old OCR images for this device
+    rm -rf "$OUTPUT_DIR"/*
+    
+    # Check if onnx_debug directory exists
+    if ! $ADB_CMD shell "test -d /sdcard/Download/onnx_debug && echo exists" | grep -q "exists"; then
+        echo "⚠️  No debug directory found on $DEVICE"
+        continue
+    fi
+    
+    # List OCR files on device
+    echo "🔍 Finding OCR images..."
+    OCR_FILES=$($ADB_CMD shell "ls /sdcard/Download/onnx_debug/*_ocr_*.jpg 2>/dev/null" | tr -d '\r')
+    # OCR_FILES=$($ADB_CMD shell "ls /sdcard/Download/onnx_debug/*.jpg 2>/dev/null" | tr -d '\r')
+    
+    if [ -z "$OCR_FILES" ]; then
+        echo "⚠️  No OCR images found on $DEVICE"
+        continue
+    fi
+    
+    # Count files
+    FILE_COUNT=$(echo "$OCR_FILES" | wc -l | tr -d ' ')
+    echo "📊 Found $FILE_COUNT OCR images"
+    
+    # Pull OCR images
+    echo "📥 Downloading..."
+    for file in $OCR_FILES; do
+        $ADB_CMD pull "$file" "$OUTPUT_DIR/" 2>/dev/null
+    done
+    
+    # Clean up device storage
+    echo "🧹 Cleaning up device storage..."
+    $ADB_CMD shell "rm -rf /sdcard/Download/onnx_debug"
+    
+    # Show results for this device
+    DOWNLOADED=$(ls "$OUTPUT_DIR"/*_ocr_*.jpg 2>/dev/null | wc -l | tr -d ' ')
+    TOTAL_IMAGES=$((TOTAL_IMAGES + DOWNLOADED))
+    
+    echo "✅ Downloaded $DOWNLOADED images to $OUTPUT_DIR/"
+    
+    # Show most recent files
+    if [ "$DOWNLOADED" -gt 0 ]; then
+        echo "📸 Most recent images:"
+        ls -lt "$OUTPUT_DIR"/*_ocr_*.jpg 2>/dev/null | head -5 | awk '{print "   " $9}'
+    fi
+done
+
 echo ""
-
-# List the pulled files
-echo "Files pulled:"
-ls -la debug_images/*.jpg 2>/dev/null | awk '{print "  " $9}'
-
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "📊 Summary: Downloaded $TOTAL_IMAGES OCR images total"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "OCR Pipeline stages:"
 echo "  *_0_ocr_yuv_crop.jpg      - Raw YUV crop from detection bbox"
@@ -34,9 +85,4 @@ echo "  *_2_ocr_rotated.jpg       - After 90° CW rotation"
 echo "  *_3_ocr_scaled.jpg        - After resize to 640 longest dimension"
 echo "  *_4_ocr_final_padded.jpg  - Final 640x640 padded image sent to OCR"
 echo ""
-echo "Detection Pipeline stages:"
-echo "  *_0_original_yuv.jpg      - Original YUV frame"
-echo "  *_0b_resized_yuv.jpg      - Resized YUV frame"
-echo "  *_1_rgb_converted.jpg     - After YUV to RGB conversion"
-echo "  *_2_rotated.jpg           - After 90° CW rotation"
-echo "  *_3_padded.jpg            - After padding to square"
+echo "🧹 Device storage cleaned up"
