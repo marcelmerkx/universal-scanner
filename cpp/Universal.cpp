@@ -19,7 +19,9 @@
 #include "preprocessing/WhitePadding.h"
 #include "preprocessing/ImageDebugger.h"
 #include "OnnxProcessor.h"
-#include "TfliteProcessor.h"
+#include "OnnxProcessorV2.h" 
+#include "ocr/YoloOCREngine.h"
+#include "ocr/ContainerOCRProcessor.h"
 #include "CodeDetectionConstants.h"
 
 #define LOGF(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "UniversalNative", fmt, ##__VA_ARGS__)
@@ -562,25 +564,26 @@ public:
 };
 
 // Global processor instances
-static std::unique_ptr<UniversalScanner::OnnxProcessor> g_onnxProcessor = nullptr;
-// TFLite processor for A/B testing
-static std::unique_ptr<UniversalScanner::TfliteProcessor> g_tfliteProcessor = nullptr;
+static std::unique_ptr<UniversalScanner::OnnxProcessorV2> g_onnxProcessorV2 = nullptr;
+// TFLite processor for A/B testing - DISABLED
+// static std::unique_ptr<UniversalScanner::TfliteProcessor> g_tfliteProcessor = nullptr;
 // Debug: raw pointer for testing
-static UniversalScanner::TfliteProcessor* g_tfliteProcessorRaw = nullptr;
+// static UniversalScanner::TfliteProcessor* g_tfliteProcessorRaw = nullptr;
 // Global Android context for asset loading
 static jobject g_androidContext = nullptr;
+static jobject g_assetManager = nullptr;
 
-// Test function to verify TFLite linkage
-extern "C" JNIEXPORT void JNICALL
-Java_com_universal_UniversalNativeModule_testTflite(JNIEnv* env, jobject /* this */) {
-    LOGF("🧪 Testing TFLite linkage...");
-    try {
-        const char* version = TfLiteVersion();
-        LOGF("✅ TFLite version: %s", version ? version : "null");
-    } catch (...) {
-        LOGF("❌ TfLiteVersion() failed");
-    }
-}
+// Test function to verify TFLite linkage - DISABLED
+// extern "C" JNIEXPORT void JNICALL
+// Java_com_universal_UniversalNativeModule_testTflite(JNIEnv* env, jobject /* this */) {
+//     LOGF("🧪 Testing TFLite linkage...");
+//     try {
+//         const char* version = TfLiteVersion();
+//         LOGF("✅ TFLite version: %s", version ? version : "null");
+//     } catch (...) {
+//         LOGF("❌ TfLiteVersion() failed");
+//     }
+// }
 
 class UniversalNativeModule : public HybridClass<UniversalNativeModule> {
 public:
@@ -616,114 +619,105 @@ public:
             
             LOGF("Processing REAL VisionCamera frame: %dx%d, %d bytes", width, height, dataSize);
             
-            UniversalScanner::DetectionResult result;
+            // TfLite processor disabled - using ONNX only
+            // Use ONNX processor
+            if (!g_onnxProcessorV2) {
+                LOGF("🏗️ Creating new OnnxProcessorV2 instance with OCR support...");
+                g_onnxProcessorV2 = std::make_unique<UniversalScanner::OnnxProcessorV2>();
+                LOGF("✅ OnnxProcessorV2 created successfully");
+            }
             
-            if (useTflite) {
-                // Use TFLite processor
-                try {
-                    if (!g_tfliteProcessor) {
-                        LOGF("🏗️ Creating new TfliteProcessor instance...");
-                        try {
-                            g_tfliteProcessor = std::make_unique<UniversalScanner::TfliteProcessor>();
-                            g_tfliteProcessorRaw = g_tfliteProcessor.get();
-                            if (!g_tfliteProcessor) {
-                                LOGF("❌ Failed to create TfliteProcessor - null pointer");
-                                result.hasDetection = false;
-                                result.confidence = 0.0f;
-                            } else {
-                                LOGF("✅ TfliteProcessor created successfully at %p", g_tfliteProcessor.get());
-                            }
-                        } catch (const std::exception& e) {
-                            LOGF("❌ Exception creating TfliteProcessor: %s", e.what());
-                            result.hasDetection = false;
-                            result.confidence = 0.0f;
-                        }
-                    }
-                    
-                    if (g_tfliteProcessor) {
-                        LOGF("📞 Calling g_tfliteProcessor->processFrame at %p...", g_tfliteProcessor.get());
-                        result = g_tfliteProcessor->processFrame(
-                            width, height, jniEnv, nullptr, frameBytes, dataSize, static_cast<uint8_t>(enabledTypesMask)
-                        );
-                        LOGF("📞 TfliteProcessor::processFrame returned - hasDetection=%s, conf=%.3f", 
-                             result.hasDetection ? "true" : "false", result.confidence);
-                    } else {
-                        LOGF("❌ g_tfliteProcessor is null, cannot process frame");
-                        result.hasDetection = false;
-                        result.confidence = 0.0f;
-                    }
-                } catch (const std::exception& e) {
-                    LOGF("❌ TFLite processor exception: %s", e.what());
-                    result.hasDetection = false;
-                    result.confidence = 0.0f;
-                } catch (...) {
-                    LOGF("❌ TFLite processor unknown exception");
-                    result.hasDetection = false;
-                    result.confidence = 0.0f;
-                }
-            } else {
-                // Use ONNX processor
-                if (!g_onnxProcessor) {
-                    LOGF("🏗️ Creating new OnnxProcessor instance...");
-                    g_onnxProcessor = std::make_unique<UniversalScanner::OnnxProcessor>();
-                    LOGF("✅ OnnxProcessor created successfully");
-                }
+            // ALWAYS try to initialize OCR if not already done (DEBUG)
+            static bool ocrInitialized = false;
+            if (!ocrInitialized) {
+                LOGF("🔧 Attempting OCR initialization...");
+                ocrInitialized = g_onnxProcessorV2->initializeOCR(jniEnv, g_assetManager);
+                LOGF("✅ OCR initialization result: %s", ocrInitialized ? "SUCCESS" : "FAILED");
+            }
+            
+            // STAGE 1: Detection for bounding box visualization
+            LOGF("📞 Stage 1: Getting detection results for bounding box...");
+            auto detectionResult = g_onnxProcessorV2->processFrame(
+                width, height, jniEnv, g_androidContext, frameBytes, dataSize, static_cast<uint8_t>(enabledTypesMask)
+            );
+            
+            if (!detectionResult.isValid()) {
+                LOGF("🚫 No detection - returning empty");
+                return make_jstring("{\"results\":[]}");
+            }
+            
+            LOGF("✅ Stage 1 complete: %s conf=%.3f", getClassName(detectionResult.classIndex), detectionResult.confidence);
+            
+            // Helper function to create JSON response
+            auto createResponse = [&](const std::vector<universalscanner::ScanResult>& ocrResults, const std::string& ocrStatus) -> std::string {
+                int pixelX = (int)(detectionResult.centerX * 320);   
+                int pixelY = (int)(detectionResult.centerY * 320);   
+                int pixelW = (int)(detectionResult.width * 320);     
+                int pixelH = (int)(detectionResult.height * 320);    
                 
-                LOGF("📞 Calling g_onnxProcessor->processFrame...");
-                result = g_onnxProcessor->processFrame(
-                    width, height, jniEnv, g_androidContext, frameBytes, dataSize, static_cast<uint8_t>(enabledTypesMask)
+                std::string json = "{";
+                
+                // Add detections array (Stage 1 - for bounding boxes)
+                json += "\"detections\":[{";
+                json += "\"type\":\"" + std::string(getClassName(detectionResult.classIndex)) + "\",";
+                json += "\"confidence\":" + std::to_string(detectionResult.confidence) + ",";
+                json += "\"x\":" + std::to_string(pixelX) + ",";
+                json += "\"y\":" + std::to_string(pixelY) + ",";
+                json += "\"width\":" + std::to_string(pixelW) + ",";
+                json += "\"height\":" + std::to_string(pixelH) + ",";
+                json += "\"model\":\"unified-detection-v7-320.onnx\"";
+                json += "}],";
+                
+                // Add ocr_results array (Stage 2 - for extracted text)
+                json += "\"ocr_results\":[";
+                for (size_t i = 0; i < ocrResults.size(); i++) {
+                    if (i > 0) json += ",";
+                    json += "{";
+                    json += "\"type\":\"" + ocrResults[i].type + "\",";
+                    json += "\"value\":\"" + ocrResults[i].value + "\",";
+                    json += "\"confidence\":" + std::to_string(ocrResults[i].confidence) + ",";
+                    json += "\"model\":\"" + ocrResults[i].model + "\"";
+                    json += "}";
+                }
+                json += "],";
+                
+                // Add OCR status for UI state management
+                json += "\"ocr_status\":\"" + ocrStatus + "\"";
+                json += "}";
+                
+                return json;
+            };
+            
+            // STAGE 1 EMIT: Immediate detection feedback (OCR not attempted)
+            std::vector<universalscanner::ScanResult> emptyOcrResults;
+            std::string stage1Response = createResponse(emptyOcrResults, "not_attempted");
+            LOGF("🎯 Stage 1 emit: Immediate detection feedback");
+            LOGF("🎯 Stage 1 response: %s", stage1Response.c_str());
+            
+            // TODO: Emit stage1Response to JS immediately here
+            
+            // STAGE 2: Conditional OCR processing
+            std::string finalResponse;
+            if (detectionResult.confidence > 0.51f) {
+                LOGF("📞 Stage 2: Running OCR pipeline (confidence %.3f > 0.51)...", detectionResult.confidence);
+                // Use the new method that doesn't re-run detection
+                auto ocrResults = g_onnxProcessorV2->processOCRWithDetection(
+                    detectionResult, width, height, frameBytes, dataSize
                 );
-                LOGF("📞 OnnxProcessor::processFrame returned");
-            }
-            
-            // Format results as JSON
-            if (!result.hasDetection || !result.isValid()) {
-                LOGF("🚫 No valid detection - returning empty result");
-                return make_jstring("{\"detections\":[]}");
-            }
-            
-            // Structured result with normalized [0,1] coordinates
-            LOGF("✨ Raw results: conf=%.3f, x=%.3f, y=%.3f, w=%.3f, h=%.3f, class=%d (%s)", 
-                 result.confidence, result.centerX, result.centerY, result.width, result.height, 
-                 result.classIndex, getClassName(result.classIndex));
-            
-            // Convert normalized coordinates back to camera frame pixels for UI
-            LOGF("=== COORDINATE DEBUG: C++ Transformation ===");
-            LOGF("Normalized coords from ONNX: x=%.3f, y=%.3f, w=%.3f, h=%.3f", 
-                 result.centerX, result.centerY, result.width, result.height);
-            
-            // Get actual model size for coordinate conversion
-            int modelSize = g_onnxProcessor ? g_onnxProcessor->getModelSize() : 640;
-            
-            int pixelX = (int)(result.centerX * modelSize);   // Convert normalized center X to pixels in model space
-            int pixelY = (int)(result.centerY * modelSize);   // Convert normalized center Y to pixels in model space  
-            int pixelW = (int)(result.width * modelSize);     // Convert normalized width to pixels in model space
-            int pixelH = (int)(result.height * modelSize);    // Convert normalized height to pixels in model space
-            
-            LOGF("Converted to %dx%d pixels: x=%d, y=%d, w=%d, h=%d", 
-                 modelSize, modelSize, pixelX, pixelY, pixelW, pixelH);
-            LOGF("These coordinates are in PADDED %dx%d space with 90° CCW rotation applied", modelSize, modelSize);
-            LOGF("Original camera was 640x480 -> rotated to 480x640 -> padded to %dx%d", modelSize, modelSize);
-            
-            std::string json = "{\"detections\":[{";
-            json += "\"type\":\"" + std::string(getClassName(result.classIndex)) + "\",";
-            json += "\"confidence\":" + std::to_string(result.confidence) + ",";
-            json += "\"x\":" + std::to_string(pixelX) + ",";
-            json += "\"y\":" + std::to_string(pixelY) + ",";
-            json += "\"width\":" + std::to_string(pixelW) + ",";
-            json += "\"height\":" + std::to_string(pixelH) + ",";
-            // Get the actual model name with size
-            std::string modelName;
-            if (useTflite) {
-                modelName = "unified-detection-v7.tflite";
+                LOGF("📞 Stage 2 complete: %zu OCR results", ocrResults.size());
+                
+                // STAGE 2 EMIT: Enhanced response with OCR results
+                finalResponse = createResponse(ocrResults, "completed");
+                LOGF("🎯 Stage 2 emit: Enhanced response with OCR results");
             } else {
-                int modelSize = g_onnxProcessor ? g_onnxProcessor->getModelSize() : 640;
-                modelName = "unified-detection-v7-" + std::to_string(modelSize) + ".onnx";
+                LOGF("⏭️ Stage 2: Skipping OCR (confidence %.3f <= 0.51)", detectionResult.confidence);
+                finalResponse = stage1Response; // Return same response as Stage 1
             }
-            json += "\"model\":\"" + modelName + "\"";
-            json += "}]}";
             
-            return make_jstring(json);
+            LOGF("🎯 Progressive enhancement architecture enabled");
+            
+            LOGF("🎯 Returning final response: %s", finalResponse.c_str());
+            return make_jstring(finalResponse);
             
         } catch (const std::exception& e) {
             LOGF("Error in nativeProcessFrameWithData: %s", e.what());
@@ -736,15 +730,25 @@ public:
         LOGF("setDebugImages called: %s", enabled ? "enabled" : "disabled");
         
         // Initialize processors if needed
-        if (!g_onnxProcessor) {
-            g_onnxProcessor = std::make_unique<UniversalScanner::OnnxProcessor>();
+        if (!g_onnxProcessorV2) {
+            LOGF("🏗️ Creating OnnxProcessorV2 in setDebugImages");
+            g_onnxProcessorV2 = std::make_unique<UniversalScanner::OnnxProcessorV2>();
+            
+            // Initialize OCR
+            if (g_assetManager) {
+                bool ocrInitialized = g_onnxProcessorV2->initializeOCR(nullptr, g_assetManager);
+                LOGF("✅ OCR initialization from setDebugImages: %s", ocrInitialized ? "SUCCESS" : "FAILED");
+            } else {
+                LOGF("⚠️ AssetManager not available in setDebugImages - OCR init deferred");
+            }
         }
-        if (!g_tfliteProcessor) {
-            g_tfliteProcessor = std::make_unique<UniversalScanner::TfliteProcessor>();
-        }
+        // TfliteProcessor disabled
+        // if (!g_tfliteProcessor) {
+        //     g_tfliteProcessor = std::make_unique<UniversalScanner::TfliteProcessor>();
+        // }
         
-        g_onnxProcessor->setDebugImages(enabled);
-        g_tfliteProcessor->setDebugImages(enabled);
+        g_onnxProcessorV2->setDebugImages(enabled);
+        // g_tfliteProcessor->setDebugImages(enabled);
     }
     
     // Set model size for ONNX
@@ -752,11 +756,20 @@ public:
         LOGF("setModelSize called: %d", size);
         
         // Initialize ONNX processor if needed
-        if (!g_onnxProcessor) {
-            g_onnxProcessor = std::make_unique<UniversalScanner::OnnxProcessor>();
+        if (!g_onnxProcessorV2) {
+            LOGF("🏗️ Creating OnnxProcessorV2 in setModelSize");
+            g_onnxProcessorV2 = std::make_unique<UniversalScanner::OnnxProcessorV2>();
+            
+            // Initialize OCR
+            if (g_assetManager) {
+                bool ocrInitialized = g_onnxProcessorV2->initializeOCR(nullptr, g_assetManager);
+                LOGF("✅ OCR initialization from setModelSize: %s", ocrInitialized ? "SUCCESS" : "FAILED");
+            } else {
+                LOGF("⚠️ AssetManager not available in setModelSize - OCR init deferred");
+            }
         }
         
-        g_onnxProcessor->setModelSize(size);
+        // g_onnxProcessorV2->setModelSize(size); // TODO: Implement in V2
     }
     
 };

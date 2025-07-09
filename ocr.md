@@ -11,7 +11,7 @@ This document provides a detailed, implementation-ready architecture for the two
    - 43% faster than 640x640 (our benchmarks)
    - Sufficient resolution for character recognition
 
-2. **Adaptive preprocessing**: Smart padding based on crop aspect ratio
+2. **Uniform preprocessing**: Single padding strategy for all container types
 3. **Reuse ContainerCameraApp code**: Direct translation of working components
 4. **Performance-first design**: Every millisecond counts
 
@@ -52,14 +52,14 @@ public:
         float padScale;         // Padding scale applied (typically 1.2-1.5)
     };
     
-    // Extract crop with smart padding based on detection type
+    // Extract crop with uniform padding for all detection types
     static CropResult extractCrop(
         const cv::Mat& frame,           // Original 1280x720 frame
         const BoundingBox& bbox,        // Detection bbox
-        const std::string& classType    // For class-specific padding
+        const std::string& classType    // For consistency with API
     ) {
-        // Reuse logic from ContainerCameraApp's ImagePaddingModule.kt
-        float padScale = getPaddingScale(classType);
+        // Uniform padding scale for all container types
+        float padScale = 1.25f;
         
         // Calculate padded rectangle
         int padX = bbox.width * (padScale - 1.0f) / 2;
@@ -77,9 +77,8 @@ public:
     
 private:
     static float getPaddingScale(const std::string& classType) {
-        if (classType == "code_container_v") return 1.3f;  // More vertical padding
-        if (classType == "code_container_h") return 1.2f;  // More horizontal padding
-        return 1.25f; // Default
+        // Uniform padding for all types
+        return 1.25f;
     }
 };
 ```
@@ -285,24 +284,66 @@ private:
         return result;
     }
     
-    // Text assembly with domain corrections
+    // Text assembly with multi-line support for horizontal containers
     std::string assembleText(
         std::vector<CharBox>& boxes,
         const std::string& classType
     ) {
-        // Sort by X coordinate (left to right)
-        std::sort(boxes.begin(), boxes.end(),
-            [](const CharBox& a, const CharBox& b) { return a.x < b.x; });
+        // Handle multi-line text (common in horizontal containers)
+        // Step 1: Calculate average character height
+        float avgHeight = 0;
+        for (const auto& box : boxes) {
+            avgHeight += box.h;
+        }
+        avgHeight /= boxes.size();
         
-        // Take top 11 for containers (ISO 6346)
-        if (classType.find("container") != std::string::npos && boxes.size() > 11) {
-            boxes.resize(11);
+        // Step 2: Cluster into lines based on Y-coordinate
+        std::vector<std::vector<CharBox>> lines;
+        std::vector<bool> assigned(boxes.size(), false);
+        
+        for (size_t i = 0; i < boxes.size(); i++) {
+            if (assigned[i]) continue;
+            
+            // Start new line with this character
+            std::vector<CharBox> line;
+            line.push_back(boxes[i]);
+            assigned[i] = true;
+            
+            // Find other characters on same line (within 0.5x avg height)
+            float lineY = boxes[i].y;
+            for (size_t j = i + 1; j < boxes.size(); j++) {
+                if (!assigned[j] && std::abs(boxes[j].y - lineY) < avgHeight * 0.5f) {
+                    line.push_back(boxes[j]);
+                    assigned[j] = true;
+                }
+            }
+            
+            lines.push_back(line);
         }
         
-        // Build text
+        // Step 3: Sort lines by Y coordinate (top to bottom)
+        std::sort(lines.begin(), lines.end(),
+            [](const std::vector<CharBox>& a, const std::vector<CharBox>& b) {
+                return a[0].y < b[0].y;
+            });
+        
+        // Step 4: Sort characters within each line by X coordinate
+        for (auto& line : lines) {
+            std::sort(line.begin(), line.end(),
+                [](const CharBox& a, const CharBox& b) { return a.x < b.x; });
+        }
+        
+        // Step 5: Build text line by line
         std::string text;
-        for (const auto& box : boxes) {
-            text += box.character;
+        for (const auto& line : lines) {
+            for (const auto& box : line) {
+                text += box.character;
+            }
+        }
+        
+        // Take top 11 for containers (ISO 6346)
+        if (classType.find("container") != std::string::npos && text.length() > 11) {
+            text = text.substr(0, 11);
         }
         
         return text;
@@ -574,5 +615,44 @@ struct FrameMetrics {
 - **End-to-end**: < 100ms per frame with 2-3 detections
 - **Accuracy**: 95%+ on container codes
 - **Memory**: < 200MB additional for OCR models
+
+---
+
+## 📦 Horizontal Container Support
+
+### Multi-Line Text Assembly
+
+The OCR pipeline elegantly handles both vertical and horizontal containers through intelligent text assembly. The key difference for horizontal containers is handling **multi-line layouts** where text appears as:
+
+```
+ABCU
+1234567
+```
+
+### Implementation Details
+
+The `YoloOCREngine::assembleText()` method includes multi-line clustering:
+
+1. **Line Detection**: Characters are grouped into lines based on Y-coordinate proximity (within 0.5x average character height)
+2. **Line Ordering**: Lines are sorted top-to-bottom by Y-coordinate
+3. **Character Ordering**: Within each line, characters are sorted left-to-right by X-coordinate
+4. **Text Assembly**: Lines are concatenated in order to form the final text
+
+### Key Benefits
+
+- **Unified Pipeline**: Same code handles both vertical and horizontal containers
+- **No Orientation-Specific Logic**: Padding, letterboxing, and validation work identically
+- **Robust**: Handles slight rotations and uneven character spacing
+- **Clean**: Only ~30 lines of line-clustering logic added to base implementation
+
+### Example Flow
+
+1. Detection identifies `code_container_h` with high confidence
+2. Crop extracted with uniform 1.25x padding
+3. Letterboxed to 320x320 for OCR model
+4. YOLO OCR detects all 11 characters across 2 lines
+5. Multi-line assembly reconstructs: "ABCU1234567"
+6. ISO 6346 validation and corrections applied
+7. Result returned with character-level bounding boxes
 
 ---

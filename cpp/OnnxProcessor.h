@@ -53,13 +53,6 @@ private:
         std::string inputName;
         std::string outputName;
     } modelInfo;
-
-    // Platform-specific YUV converter and resizer
-    std::unique_ptr<YuvConverter> yuvConverter;
-    std::unique_ptr<IYuvResizer> yuvResizer;
-    
-    // Debug image logging control
-    bool enableDebugImages;
     
     // Execution provider tracking for performance analysis
     ExecutionProvider currentExecutionProvider;
@@ -77,6 +70,13 @@ private:
                                           int width, int height);
     DetectionResult runInference(const std::vector<float>& inputTensor, uint8_t enabledCodeTypesMask);
     DetectionResult findBestDetection(const std::vector<float>& modelOutput, uint8_t enabledCodeTypesMask);
+
+protected:
+    // Debug image logging control (accessible to derived classes)
+    bool enableDebugImages;
+    // Platform-specific YUV converter and resizer (accessible to derived classes)
+    std::unique_ptr<YuvConverter> yuvConverter;
+    std::unique_ptr<IYuvResizer> yuvResizer;
 
 public:
     OnnxProcessor();
