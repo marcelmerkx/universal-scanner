@@ -22,6 +22,13 @@ public:
         int height
     ) override;
     
+    std::vector<uint8_t> convertYuvToGrayscaleRgb(
+        const uint8_t* frameData,
+        size_t frameSize,
+        int width,
+        int height
+    ) override;
+    
 private:
     // TODO: Add iOS-specific YUV conversion implementation
     // Will use Core Video frameworks for optimal performance

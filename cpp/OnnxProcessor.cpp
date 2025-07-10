@@ -90,18 +90,16 @@ bool OnnxProcessor::initializeModel() {
     if (modelLoaded) return true;
     
     try {
-        // Update model info based on size
-        modelInfo.inputShape = {1, 3, modelSize_, modelSize_}; // NCHW format
-        // Output shape changes based on model size:
-        // 320x320: 2100 anchors, 416x416: 3549 anchors, 640x640: 8400 anchors
-        int numAnchors = (modelSize_ == 320) ? 2100 : (modelSize_ == 416) ? 3549 : 8400;
-        modelInfo.outputShape = {1, 9, numAnchors}; // 9 features x anchors
+        // The new grayscale model only supports 320x320 input
+        modelSize_ = 320;
+        modelInfo.inputShape = {1, 3, 320, 320}; // NCHW format, grayscale in 3-channel
+        modelInfo.outputShape = {1, 9, 2100}; // 9 features x 2100 anchors for 320x320
         modelInfo.inputName = "images";
         modelInfo.outputName = "output0";
         
-        // Build model filename based on size
-        std::string modelFilename = "unified-detection-v7-" + std::to_string(modelSize_) + ".onnx";
-        LOGF("Loading model: %s", modelFilename.c_str());
+        // Use the new grayscale model (fixed filename, no size variants)
+        std::string modelFilename = "detection_v10_320_grayscale_tilted-09-07-2025.onnx";
+        LOGF("Loading grayscale model: %s (320x320 grayscale)", modelFilename.c_str());
         
         // Try to load model from internal storage first
         std::string modelPath = "/data/data/com.cargosnap.universalscanner/files/" + modelFilename;
@@ -378,18 +376,18 @@ std::vector<uint8_t> OnnxProcessor::preprocessFrame(const uint8_t* frameData, si
         }
     }
     
-    // Step 2: Convert YUV to RGB
-    LOGF("Converting YUV to RGB (%dx%d)", processWidth, processHeight);
+    // Step 2: Convert YUV to Grayscale RGB
+    LOGF("Converting YUV to Grayscale RGB (%dx%d)", processWidth, processHeight);
     size_t processFrameSize = resizedYuvData.empty() ? frameSize : resizedYuvData.size();
-    auto rgbData = yuvConverter->convertYuvToRgb(processFrameData, processFrameSize, processWidth, processHeight);
+    auto rgbData = yuvConverter->convertYuvToGrayscaleRgb(processFrameData, processFrameSize, processWidth, processHeight);
     
     if (rgbData.empty()) {
-        LOGF("ERROR: YUV to RGB conversion failed");
+        LOGF("ERROR: YUV to Grayscale RGB conversion failed");
         return {};
     }
     
     if (DebugConfig::getInstance().isDebugImagesEnabled()) {
-        UniversalScanner::ImageDebugger::saveRGB("1_rgb_converted.jpg", rgbData, processWidth, processHeight);
+        UniversalScanner::ImageDebugger::saveRGB("1_grayscale_rgb_converted.jpg", rgbData, processWidth, processHeight);
     }
     
     // Step 3: Apply 90° CW rotation

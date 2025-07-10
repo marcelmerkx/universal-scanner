@@ -34,6 +34,21 @@ public:
     ) = 0;
     
     /**
+     * Convert YUV frame data to Grayscale RGB format (R=G=B=Y)
+     * @param frameData Raw YUV frame bytes from camera
+     * @param frameSize Size of frame data in bytes
+     * @param width Frame width in pixels
+     * @param height Frame height in pixels
+     * @return RGB data as uint8_t vector (width * height * 3 bytes) where R=G=B=Y
+     */
+    virtual std::vector<uint8_t> convertYuvToGrayscaleRgb(
+        const uint8_t* frameData,
+        size_t frameSize,
+        int width,
+        int height
+    ) = 0;
+    
+    /**
      * Factory method to create platform-specific converter
      */
     static std::unique_ptr<YuvConverter> create(

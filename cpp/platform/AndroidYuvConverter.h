@@ -29,6 +29,13 @@ public:
         int height
     ) override;
     
+    std::vector<uint8_t> convertYuvToGrayscaleRgb(
+        const uint8_t* frameData,
+        size_t frameSize,
+        int width,
+        int height
+    ) override;
+    
 private:
     bool initializeJavaConverter(jobject context);
 };

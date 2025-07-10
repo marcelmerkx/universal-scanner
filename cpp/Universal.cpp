@@ -93,11 +93,11 @@ public:
         
         try {
             // Try to load model from internal storage
-            std::string modelPath = "/data/data/com.cargosnap.universalscanner/files/unified-detection-v7.onnx";
+            std::string modelPath = "/data/data/com.cargosnap.universalscanner/files/detection_v10_320_grayscale_tilted-09-07-2025.onnx";
             auto modelData = loadModelFromFile(modelPath);
             if (modelData.empty()) {
                 // Try assets location
-                modelPath = "/android_asset/unified-detection-v7.onnx";
+                modelPath = "/android_asset/detection_v10_320_grayscale_tilted-09-07-2025.onnx";
                 modelData = loadModelFromFile(modelPath);
                 if (modelData.empty()) {
                     LOGF("Failed to load model from any location");

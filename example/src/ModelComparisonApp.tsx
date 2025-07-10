@@ -237,7 +237,7 @@ export default function ModelComparisonApp(): React.ReactNode {
           y: topLeftY * scale,
           width: boxWidth * scale,
           height: boxHeight * scale,
-          model: 'unified-detection-v7.tflite'
+          model: 'detection_v10_320_grayscale_tilted-09-07-2025.onnx'
         })
       }
     }

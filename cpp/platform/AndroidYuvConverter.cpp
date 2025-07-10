@@ -117,6 +117,41 @@ std::vector<uint8_t> AndroidYuvConverter::convertYuvToRgb(
     }
 }
 
+std::vector<uint8_t> AndroidYuvConverter::convertYuvToGrayscaleRgb(
+    const uint8_t* frameData,
+    size_t frameSize,
+    int width,
+    int height
+) {
+    LOGF("Converting YUV to Grayscale RGB (%dx%d)", width, height);
+    
+    // For YUV_420_888 format, Y plane contains the luminance data
+    // We just need to extract Y and replicate it to R, G, B channels
+    size_t ySize = width * height;
+    
+    if (frameSize < ySize) {
+        LOGF("ERROR: Frame size %zu is smaller than expected Y plane size %zu", frameSize, ySize);
+        return {};
+    }
+    
+    // Create RGB output buffer (3 bytes per pixel)
+    std::vector<uint8_t> rgbData(width * height * 3);
+    
+    // Extract Y plane data and replicate to RGB channels
+    const uint8_t* yPlane = frameData;
+    uint8_t* rgbPtr = rgbData.data();
+    
+    for (size_t i = 0; i < ySize; i++) {
+        uint8_t yValue = yPlane[i];
+        *rgbPtr++ = yValue;  // R
+        *rgbPtr++ = yValue;  // G
+        *rgbPtr++ = yValue;  // B
+    }
+    
+    LOGF("Successfully converted YUV to Grayscale RGB: %zu bytes -> %zu RGB bytes", frameSize, rgbData.size());
+    return rgbData;
+}
+
 } // namespace UniversalScanner
 
 #endif // __ANDROID__

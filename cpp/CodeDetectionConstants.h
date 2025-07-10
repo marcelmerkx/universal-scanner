@@ -6,9 +6,9 @@
 namespace UniversalScanner {
 
 /**
- * Code Detection Classes for unified-detection-v7.onnx model
+ * Code Detection Classes for detection_v10_320_grayscale_tilted-09-07-2025.onnx model
  * 
- * These constants are derived from detection/models/unified-detection-v7.yaml
+ * These constants are derived from detection dataset v10 training configuration
  * and must match the trained model's class indices exactly.
  * 
  * YAML source:
