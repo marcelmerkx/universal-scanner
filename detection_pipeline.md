@@ -5,7 +5,7 @@ at this stage, we have a LANDSCAPE camera frame (1280x720) and on that frame we 
 It's not going too smooth, hence this file, we're going to systematically go through each step, tracking the logic and making sure the pipeline functions optimally. 
 
 We're almost there.  We will want to take 2 more steps: 
-* we have a new weights model, which was trained on 320x320 grayscale images. So in our preprocessing pipeline we need to not  just go from YUV to RGB, we need to make it grayscale (but for ONNX YOLO use, to I guess still using 3 channels in RGB, just gray). 
+* we have a new weights model, detection/models/detection_v10_320_grayscale_tilted-09-07-2025.onnx , which was trained on 320x320 grayscale images. So in our preprocessing pipeline we need to not  just go from YUV to RGB, we need to make it grayscale (but for ONNX YOLO use, to I guess still using 3 channels in RGB, just gray). 
 * improve current flow, we make a lot of misses still
 
 ## DectionPreprocessing

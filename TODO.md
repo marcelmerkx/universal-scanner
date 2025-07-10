@@ -1,4 +1,6 @@
 
+[ ] run the better detection model (v10 training), but based on black/white
+
 [ ] deal with some artefacts: 
 ``` 
 type: 'code_' + classNames[bestClass]

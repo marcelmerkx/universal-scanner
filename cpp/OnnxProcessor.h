@@ -72,8 +72,6 @@ private:
     DetectionResult findBestDetection(const std::vector<float>& modelOutput, uint8_t enabledCodeTypesMask);
 
 protected:
-    // Debug image logging control (accessible to derived classes)
-    bool enableDebugImages;
     // Platform-specific YUV converter and resizer (accessible to derived classes)
     std::unique_ptr<YuvConverter> yuvConverter;
     std::unique_ptr<IYuvResizer> yuvResizer;
@@ -91,7 +89,7 @@ public:
                                 const uint8_t* frameData, size_t frameSize, uint8_t enabledCodeTypesMask = CodeDetectionMask::ALL);
     
     // Debug image control
-    void setDebugImages(bool enabled) { enableDebugImages = enabled; }
+    void setDebugImages(bool enabled);
     
     // Performance monitoring
     ExecutionProvider getExecutionProvider() const { return currentExecutionProvider; }

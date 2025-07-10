@@ -1,4 +1,5 @@
 #include "OnnxProcessorV2.h"
+#include "DebugConfig.h"
 #include "preprocessing/CropExtractor.h"
 #include "preprocessing/AdaptiveLetterbox.h"
 #include "preprocessing/FrameConverter.h"
@@ -172,8 +173,7 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
     }
     
     // Debug: Save YUV crop
-    LOGD("📸 Debug images enabled: %s", enableDebugImages ? "YES" : "NO");
-    if (enableDebugImages) {
+    if (DebugConfig::getInstance().isDebugImagesEnabled()) {
         std::string typeShort = classType.substr(5); // Remove "code_" prefix
         std::string debugPrefix = typeShort + "_0_ocr_yuv_crop.jpg";
         LOGD("📸 Saving OCR debug image: %s", debugPrefix.c_str());
@@ -209,7 +209,7 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
         std::copy(rgbVector.begin(), rgbVector.end(), rgbImage.data.begin());
         
         // Debug: Save RGB conversion
-        if (enableDebugImages) {
+        if (DebugConfig::getInstance().isDebugImagesEnabled()) {
             std::string typeShort = classType.substr(5); // Remove "code_" prefix
             std::string debugFilename = typeShort + "_1_ocr_rgb_converted.jpg";
             LOGD("📸 Saving OCR debug image: %s", debugFilename.c_str());
@@ -232,7 +232,7 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
         }
         
         // Debug: Save rotated image
-        if (enableDebugImages) {
+        if (DebugConfig::getInstance().isDebugImagesEnabled()) {
             std::string typeShort = classType.substr(5); // Remove "code_" prefix
             std::string debugFilename = typeShort + "_2_ocr_rotated.jpg";
             LOGD("📸 Saving OCR debug image: %s", debugFilename.c_str());
@@ -263,7 +263,7 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
         auto scaledImage = rotatedImage.resize(scaledW, scaledH);
         
         // Debug: Save scaled image
-        if (enableDebugImages) {
+        if (DebugConfig::getInstance().isDebugImagesEnabled()) {
             std::string typeShort = classType.substr(5); // Remove "code_" prefix
             std::string debugFilename = typeShort + "_3_ocr_scaled.jpg";
             LOGD("📸 Saving OCR debug image: %s", debugFilename.c_str());
@@ -288,7 +288,7 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
         }
         
         // Debug: Save final padded image
-        if (enableDebugImages) {
+        if (DebugConfig::getInstance().isDebugImagesEnabled()) {
             std::string typeShort = classType.substr(5); // Remove "code_" prefix
             std::string debugFilename = typeShort + "_4_ocr_final_padded.jpg";
             LOGD("📸 Saving OCR debug image: %s", debugFilename.c_str());

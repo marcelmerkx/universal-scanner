@@ -79,7 +79,7 @@ export default function ModelComparisonApp(): React.ReactNode {
   const device = useCameraDevice('back')
   const [lastResult, setLastResult] = React.useState<any>(null)
   const [fps, setFps] = React.useState(0)
-  const [debugImages, setDebugImages] = React.useState(true) // Default to true
+  const [debugImages, setDebugImages] = React.useState(__DEV__) // Default to true in dev, false in release
   const screenDimensions = Dimensions.get('window')
   const [previousDetections, setPreviousDetections] = React.useState<Map<string, any>>(new Map())
   const [modelSize, setModelSize] = React.useState<320 | 416 | 640>(320)

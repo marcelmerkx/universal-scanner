@@ -1,4 +1,5 @@
 #include "OnnxProcessor.h"
+#include "DebugConfig.h"
 #include <android/log.h>
 #include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
@@ -19,20 +20,14 @@ OnnxProcessor::OnnxProcessor()
       modelLoaded(false), 
       modelSize_(320),  // Default to 320 for faster initialization
       yuvConverter(nullptr), 
-      enableDebugImages(true),  // Default to true for debugging
       currentExecutionProvider(ExecutionProvider::CPU),
       assetManager_(nullptr),
       env_(nullptr) {
     LOGF("OnnxProcessor created");
     
-    // Enable debug images by default in DEBUG builds, disable in release
-    #ifdef DEBUG
-        enableDebugImages = true;
-        LOGF("Debug images enabled (DEBUG build)");
-    #else
-        enableDebugImages = true;  // Force enable for OCR debugging
-        LOGF("Debug images force enabled for OCR debugging");
-    #endif
+    // Log debug image state
+    bool debugEnabled = DebugConfig::getInstance().isDebugImagesEnabled();
+    LOGF("Debug images %s", debugEnabled ? "enabled" : "disabled");
 }
 
 // Load model from file path 
@@ -328,7 +323,7 @@ std::vector<uint8_t> OnnxProcessor::preprocessFrame(const uint8_t* frameData, si
     LOGF("Processing REAL camera frame data: %dx%d, %zu bytes", width, height, frameSize);
     
     // DEBUG: Save original YUV frame
-    if (enableDebugImages) {
+    if (DebugConfig::getInstance().isDebugImagesEnabled()) {
         size_t ySize = width * height;
         size_t uvSize = ySize / 4;
         const uint8_t* yPlane = frameData;
@@ -370,7 +365,7 @@ std::vector<uint8_t> OnnxProcessor::preprocessFrame(const uint8_t* frameData, si
             processFrameData = resizedYuvData.data();
             
             // DEBUG: Save resized YUV frame
-            if (enableDebugImages) {
+            if (DebugConfig::getInstance().isDebugImagesEnabled()) {
                 size_t resizedYSize = processWidth * processHeight;
                 size_t resizedUvSize = resizedYSize / 4;
                 const uint8_t* resizedYPlane = processFrameData;
@@ -393,7 +388,7 @@ std::vector<uint8_t> OnnxProcessor::preprocessFrame(const uint8_t* frameData, si
         return {};
     }
     
-    if (enableDebugImages) {
+    if (DebugConfig::getInstance().isDebugImagesEnabled()) {
         UniversalScanner::ImageDebugger::saveRGB("1_rgb_converted.jpg", rgbData, processWidth, processHeight);
     }
     
@@ -402,7 +397,7 @@ std::vector<uint8_t> OnnxProcessor::preprocessFrame(const uint8_t* frameData, si
     rgbData = UniversalScanner::ImageRotation::rotate90CW(rgbData, processWidth, processHeight);
     std::swap(processWidth, processHeight); // Dimensions swapped after rotation
     
-    if (enableDebugImages) {
+    if (DebugConfig::getInstance().isDebugImagesEnabled()) {
         UniversalScanner::ImageDebugger::saveRGB("2_rotated.jpg", rgbData, processWidth, processHeight);
     }
     
@@ -423,7 +418,7 @@ std::vector<float> OnnxProcessor::createTensorFromRGB(const std::vector<uint8_t>
         return {};
     }
     
-    if (enableDebugImages) {
+    if (DebugConfig::getInstance().isDebugImagesEnabled()) {
         UniversalScanner::ImageDebugger::saveTensor("3_padded.jpg", inputTensor, modelSize_, modelSize_);
     }
     
@@ -600,6 +595,11 @@ void OnnxProcessor::setModelSize(int size) {
         session.reset();
         ortEnv.reset();
     }
+}
+
+void OnnxProcessor::setDebugImages(bool enabled) {
+    DebugConfig::getInstance().setDebugImagesEnabled(enabled);
+    LOGF("Debug images %s", enabled ? "enabled" : "disabled");
 }
 
 } // namespace UniversalScanner
