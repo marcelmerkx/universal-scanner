@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { StyleSheet, View, Text, ActivityIndicator, ScrollView, Dimensions, TouchableOpacity } from 'react-native'
+import { StyleSheet, View, Text, ActivityIndicator, ScrollView, Dimensions, TouchableOpacity, Alert } from 'react-native'
 import {
   Camera,
   useCameraDevice,
@@ -13,6 +13,7 @@ import { useResizePlugin } from 'vision-camera-resize-plugin'
 import { Worklets } from 'react-native-worklets-core'
 import { CODE_DETECTION_TYPES } from './CodeDetectionTypes'
 import { renderSimplifiedBoundingBoxes } from './SimplifiedBoundingBoxes'
+import { processContainerCode } from './ContainerValidation'
 // import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated'
 
 // Type definitions for scanner results
@@ -85,6 +86,12 @@ export default function ModelComparisonApp(): React.ReactNode {
   const [modelSize, setModelSize] = React.useState<320 | 416 | 640>(320)
   const [inferenceTime, setInferenceTime] = React.useState(0)
   
+  // Container code validation state
+  const [validCodeMatches, setValidCodeMatches] = React.useState<Map<string, number>>(new Map())
+  const [successfulCode, setSuccessfulCode] = React.useState<string | null>(null)
+  const [isFrameProcessorActive, setIsFrameProcessorActive] = React.useState(true)
+  const frameProcessorRef = React.useRef<any>(null)
+  
   // Find EXACT 1280x720 format that our coordinate transformation expects
   const format = React.useMemo(() => {
     if (!device?.formats) return undefined
@@ -144,6 +151,86 @@ export default function ModelComparisonApp(): React.ReactNode {
   // Track FPS
   const frameCount = React.useRef(0)
   const lastFpsUpdate = React.useRef(Date.now())
+  
+  // Container code validation functions
+  const processOCRDetection = Worklets.createRunOnJS((value: string) => {
+    console.log(`[OCR] Processing detected text: "${value}"`);
+    
+    // Only process if we have at least 11 characters
+    if (value.length < 11) {
+      console.log(`[OCR] Text too short: ${value.length} chars (need 11+)`);
+      return;
+    }
+    
+    try {
+      const result = processContainerCode(value);
+      console.log(`[OCR] Validation result:`, result);
+      
+      if (result.isValid) {
+        console.log(`[OCR] ✅ Valid container code: ${result.corrected}`);
+        
+        // Update the matches map
+        setValidCodeMatches(prevMatches => {
+          const newMatches = new Map(prevMatches);
+          const currentCount = newMatches.get(result.corrected) || 0;
+          const newCount = currentCount + 1;
+          newMatches.set(result.corrected, newCount);
+          
+          console.log(`[OCR] Code "${result.corrected}" now has ${newCount} matches`);
+          
+          // Check if we have 3 matches
+          if (newCount >= 3 && !successfulCode) {
+            console.log(`[OCR] 🎉 SUCCESS! Code "${result.corrected}" reached 3 matches`);
+            handleSuccessfulDetection(result.corrected);
+          }
+          
+          return newMatches;
+        });
+      } else {
+        console.log(`[OCR] ❌ Invalid container code: ${result.corrected}`);
+      }
+    } catch (error) {
+      console.error(`[OCR] Error processing container code:`, error);
+    }
+  });
+  
+  const handleSuccessfulDetection = (code: string) => {
+    console.log(`[SUCCESS] Handling successful detection: ${code}`);
+    
+    // Set successful code
+    setSuccessfulCode(code);
+    
+    // Stop frame processor
+    setIsFrameProcessorActive(false);
+    
+    // Play a beep sound (simple alert for now - can be enhanced with audio)
+    Alert.alert(
+      '✅ Container Code Detected!',
+      `Successfully scanned:\n${code}`,
+      [
+        {
+          text: 'Clear & Resume',
+          onPress: clearAndResume,
+        },
+      ]
+    );
+    
+    console.log(`[SUCCESS] Frame processor stopped, showing success UI`);
+  };
+  
+  const clearAndResume = () => {
+    console.log(`[CLEAR] Clearing detection and resuming scanner`);
+    
+    // Clear all state
+    setSuccessfulCode(null);
+    setValidCodeMatches(new Map());
+    setLastResult(null);
+    
+    // Resume frame processor
+    setIsFrameProcessorActive(true);
+    
+    console.log(`[CLEAR] Scanner resumed, ready for next detection`);
+  };
   
   // Process TFLite YOLO output
   const processTfliteOutput = (output: Float32Array): Detection[] => {
@@ -262,11 +349,32 @@ export default function ModelComparisonApp(): React.ReactNode {
     setLastResult(result)
     setInferenceTime(inferenceMs)
     console.log('Scan result:', result)
+    
+    // Process OCR results for container codes
+    if (result?.ocr_results && result.ocr_results.length > 0) {
+      result.ocr_results.forEach((ocrResult: any) => {
+        console.log(`[OCR] Found OCR result: type="${ocrResult.type}", value="${ocrResult.value}", confidence=${ocrResult.confidence}`);
+        
+        // Check if it's a container code type and has good confidence
+        if ((ocrResult.type === 'code_container_h' || ocrResult.type === 'code_container_v') && 
+            ocrResult.confidence > 0.5 && 
+            ocrResult.value && 
+            ocrResult.value.length >= 11) {
+          console.log(`[OCR] Processing container code: "${ocrResult.value}"`);
+          processOCRDetection(ocrResult.value);
+        }
+      });
+    }
   })
 
   const frameProcessor = useFrameProcessor(
     (frame: Frame) => {
       'worklet'
+      
+      // Skip processing if frame processor is not active
+      if (!isFrameProcessorActive) {
+        return;
+      }
       
       // Update FPS counter
       updateFps()
@@ -317,7 +425,7 @@ export default function ModelComparisonApp(): React.ReactNode {
         console.log('Error stack:', error?.stack)
       }
     },
-    [universalScanner, debugImages, modelSize]
+    [universalScanner, debugImages, modelSize, isFrameProcessorActive]
   )
 
   React.useEffect(() => {
@@ -399,8 +507,36 @@ export default function ModelComparisonApp(): React.ReactNode {
   
   
 
+  const renderValidationProgress = () => {
+    if (validCodeMatches.size === 0) return null;
+    
+    return (
+      <View style={styles.validationContainer}>
+        <Text style={styles.validationTitle}>Container Code Validation:</Text>
+        {Array.from(validCodeMatches.entries()).map(([code, count]) => (
+          <Text key={code} style={styles.validationProgress}>
+            {code}: {count}/3 matches {count >= 3 ? '✅' : '⏳'}
+          </Text>
+        ))}
+      </View>
+    );
+  };
+
   const renderResult = () => {
-    if (!lastResult) return null
+    // Show success state if we have a successful code
+    if (successfulCode) {
+      return (
+        <View style={styles.successContainer}>
+          <Text style={styles.successTitle}>✅ SUCCESS!</Text>
+          <Text style={styles.successCode}>{successfulCode}</Text>
+          <TouchableOpacity style={styles.clearButton} onPress={clearAndResume}>
+            <Text style={styles.clearButtonText}>Clear & Resume</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    
+    if (!lastResult) return renderValidationProgress();
     
     return (
       <View style={styles.resultContainer}>
@@ -410,6 +546,7 @@ export default function ModelComparisonApp(): React.ReactNode {
             <Text style={styles.ocrInline}> • OCR: {lastResult.detections[0].value}</Text>
           )}
         </Text>
+        {renderValidationProgress()}
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
           {lastResult.detections && lastResult.detections.map((detection: any, index: number) => (
             <View key={index} style={styles.detection}>
@@ -420,6 +557,11 @@ export default function ModelComparisonApp(): React.ReactNode {
               <Text style={styles.detectionValue}>
                 pos: {parseInt(detection.x)},{parseInt(detection.y)} • {detection.model}
               </Text>
+              {detection.value && (
+                <Text style={styles.detectionValue}>
+                  OCR: {detection.value}
+                </Text>
+              )}
             </View>
           ))}
         </ScrollView>
@@ -750,5 +892,70 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     paddingVertical: 1,
     transform: [{ rotate: '90deg' }],
+  },
+  // Container validation styles
+  validationContainer: {
+    backgroundColor: 'rgba(0, 0, 255, 0.1)',
+    padding: 8,
+    marginVertical: 4,
+    borderRadius: 4,
+  },
+  validationTitle: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: 'white',
+    marginBottom: 4,
+  },
+  validationProgress: {
+    fontSize: 11,
+    color: 'white',
+    marginVertical: 1,
+  },
+  // Success state styles
+  successContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0, 255, 0, 0.2)',
+    padding: 20,
+    alignItems: 'center',
+  },
+  successTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#00FF00',
+    marginBottom: 10,
+    textShadowColor: 'rgba(0, 0, 0, 0.75)',
+    textShadowOffset: { width: -1, height: 1 },
+    textShadowRadius: 10,
+  },
+  successCode: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginBottom: 15,
+    textAlign: 'center',
+  },
+  clearButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  clearButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: 'bold',
+    textAlign: 'center',
   },
 })
