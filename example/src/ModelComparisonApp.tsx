@@ -703,7 +703,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: -25,
     left: 0,
-    backgroundColor: 'rgba(0, 255, 0, 0.8)',
+    backgroundColor: 'rgba(0, 255, 0, 0.2)',
     color: 'black',
     fontSize: 12,
     fontWeight: 'bold',

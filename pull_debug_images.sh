@@ -36,9 +36,9 @@ for DEVICE in $DEVICES; do
         continue
     fi
     
-    # List OCR files on device
+    # List OCR files on device (now with type prefix)
     echo "🔍 Finding OCR images..."
-    OCR_FILES=$($ADB_CMD shell "ls /sdcard/Download/onnx_debug/*_ocr_*.jpg 2>/dev/null" | tr -d '\r')
+    OCR_FILES=$($ADB_CMD shell "ls /sdcard/Download/onnx_debug/*_*_ocr_*.jpg 2>/dev/null" | tr -d '\r')
     # OCR_FILES=$($ADB_CMD shell "ls /sdcard/Download/onnx_debug/*.jpg 2>/dev/null" | tr -d '\r')
     
     if [ -z "$OCR_FILES" ]; then
@@ -61,7 +61,7 @@ for DEVICE in $DEVICES; do
     $ADB_CMD shell "rm -rf /sdcard/Download/onnx_debug"
     
     # Show results for this device
-    DOWNLOADED=$(ls "$OUTPUT_DIR"/*_ocr_*.jpg 2>/dev/null | wc -l | tr -d ' ')
+    DOWNLOADED=$(ls "$OUTPUT_DIR"/*_*_ocr_*.jpg 2>/dev/null | wc -l | tr -d ' ')
     TOTAL_IMAGES=$((TOTAL_IMAGES + DOWNLOADED))
     
     echo "✅ Downloaded $DOWNLOADED images to $OUTPUT_DIR/"
@@ -69,7 +69,7 @@ for DEVICE in $DEVICES; do
     # Show most recent files
     if [ "$DOWNLOADED" -gt 0 ]; then
         echo "📸 Most recent images:"
-        ls -lt "$OUTPUT_DIR"/*_ocr_*.jpg 2>/dev/null | head -5 | awk '{print "   " $9}'
+        ls -lt "$OUTPUT_DIR"/*_*_ocr_*.jpg 2>/dev/null | head -5 | awk '{print "   " $9}'
     fi
 done
 
@@ -78,11 +78,13 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "📊 Summary: Downloaded $TOTAL_IMAGES OCR images total"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
-echo "OCR Pipeline stages:"
-echo "  *_0_ocr_yuv_crop.jpg      - Raw YUV crop from detection bbox"
-echo "  *_1_ocr_rgb_converted.jpg - After YUV to RGB conversion"
-echo "  *_2_ocr_rotated.jpg       - After 90° CW rotation"
-echo "  *_3_ocr_scaled.jpg        - After resize to 640 longest dimension"
-echo "  *_4_ocr_final_padded.jpg  - Final 640x640 padded image sent to OCR"
+echo "OCR Pipeline stages (with type prefix):"
+echo "  {type}_0_ocr_yuv_crop.jpg      - Raw YUV crop from detection bbox"
+echo "  {type}_1_ocr_rgb_converted.jpg - After YUV to RGB conversion"
+echo "  {type}_2_ocr_rotated.jpg       - After 90° CW rotation"
+echo "  {type}_3_ocr_scaled.jpg        - After resize to 640 longest dimension"
+echo "  {type}_4_ocr_final_padded.jpg  - Final 640x640 padded image sent to OCR"
+echo ""
+echo "Type prefixes: container_h, container_v, license_plate, qr_barcode, seal"
 echo ""
 echo "🧹 Device storage cleaned up"

@@ -178,13 +178,15 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
     // Debug: Save YUV crop
     LOGD("📸 Debug images enabled: %s", enableDebugImages ? "YES" : "NO");
     if (enableDebugImages) {
-        LOGD("📸 Saving OCR debug image: 0_ocr_yuv_crop.jpg");
+        std::string typeShort = classType.substr(5); // Remove "code_" prefix
+        std::string debugPrefix = typeShort + "_0_ocr_yuv_crop.jpg";
+        LOGD("📸 Saving OCR debug image: %s", debugPrefix.c_str());
         // Extract Y plane for visualization
         size_t ySize = cropBox.width * cropBox.height;
         const uint8_t* yPlane = croppedYuv.data();
         const uint8_t* uPlane = croppedYuv.data() + ySize;
         const uint8_t* vPlane = croppedYuv.data() + ySize + ySize/4;
-        UniversalScanner::ImageDebugger::saveYUV420("0_ocr_yuv_crop.jpg", 
+        UniversalScanner::ImageDebugger::saveYUV420(debugPrefix.c_str(), 
             yPlane, uPlane, vPlane, cropBox.width, cropBox.height, 
             cropBox.width, (cropBox.width + 1) / 2);
     }
@@ -212,8 +214,10 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
         
         // Debug: Save RGB conversion
         if (enableDebugImages) {
-            LOGD("📸 Saving OCR debug image: 1_ocr_rgb_converted.jpg");
-            UniversalScanner::ImageDebugger::saveRGB("1_ocr_rgb_converted.jpg", 
+            std::string typeShort = classType.substr(5); // Remove "code_" prefix
+            std::string debugFilename = typeShort + "_1_ocr_rgb_converted.jpg";
+            LOGD("📸 Saving OCR debug image: %s", debugFilename.c_str());
+            UniversalScanner::ImageDebugger::saveRGB(debugFilename.c_str(), 
                 rgbImage.data, cropW, cropH);
         }
         
@@ -233,8 +237,10 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
         
         // Debug: Save rotated image
         if (enableDebugImages) {
-            LOGD("📸 Saving OCR debug image: 2_ocr_rotated.jpg");
-            UniversalScanner::ImageDebugger::saveRGB("2_ocr_rotated.jpg", 
+            std::string typeShort = classType.substr(5); // Remove "code_" prefix
+            std::string debugFilename = typeShort + "_2_ocr_rotated.jpg";
+            LOGD("📸 Saving OCR debug image: %s", debugFilename.c_str());
+            UniversalScanner::ImageDebugger::saveRGB(debugFilename.c_str(), 
                 rotatedImage.data, rotatedImage.width, rotatedImage.height);
         }
         
@@ -262,8 +268,10 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
         
         // Debug: Save scaled image
         if (enableDebugImages) {
-            LOGD("📸 Saving OCR debug image: 3_ocr_scaled.jpg");
-            UniversalScanner::ImageDebugger::saveRGB("3_ocr_scaled.jpg", 
+            std::string typeShort = classType.substr(5); // Remove "code_" prefix
+            std::string debugFilename = typeShort + "_3_ocr_scaled.jpg";
+            LOGD("📸 Saving OCR debug image: %s", debugFilename.c_str());
+            UniversalScanner::ImageDebugger::saveRGB(debugFilename.c_str(), 
                 scaledImage.data, scaledW, scaledH);
         }
         
@@ -285,8 +293,10 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
         
         // Debug: Save final padded image
         if (enableDebugImages) {
-            LOGD("📸 Saving OCR debug image: 4_ocr_final_padded.jpg");
-            UniversalScanner::ImageDebugger::saveRGB("4_ocr_final_padded.jpg", 
+            std::string typeShort = classType.substr(5); // Remove "code_" prefix
+            std::string debugFilename = typeShort + "_4_ocr_final_padded.jpg";
+            LOGD("📸 Saving OCR debug image: %s", debugFilename.c_str());
+            UniversalScanner::ImageDebugger::saveRGB(debugFilename.c_str(), 
                 paddedImage.data, 640, 640);
         }
         

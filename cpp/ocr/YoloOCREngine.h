@@ -53,6 +53,7 @@ protected:
     std::vector<CharBox> parseYoloOutput(const Ort::Value& output, int modelSize);
     std::vector<CharBox> runNMS(std::vector<CharBox>& boxes, float iouThreshold);
     std::string assembleText(std::vector<CharBox>& boxes, const std::string& classType);
+    std::string assembleHorizontalContainerText(std::vector<CharBox>& boxes);
     float calculateConfidence(const std::vector<CharBox>& boxes);
     
 private:

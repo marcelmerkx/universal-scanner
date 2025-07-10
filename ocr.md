@@ -625,15 +625,19 @@ struct FrameMetrics {
 The OCR pipeline elegantly handles both vertical and horizontal containers through intelligent text assembly. The key difference for horizontal containers is handling **multi-line layouts** where text appears as:
 
 ```
+ABCU1234567
+```
+or sometimes:
+```
 ABCU
 1234567
 ```
 
 ### Implementation Details
 
-The `YoloOCREngine::assembleText()` method includes multi-line clustering:
+The `YoloOCREngine::assembleText()` method includes one or two-line clustering:
 
-1. **Line Detection**: Characters are grouped into lines based on Y-coordinate proximity (within 0.5x average character height)
+1. **Line Detection**: Characters are grouped into lines based on Y-coordinate proximity (within 1x average character height)
 2. **Line Ordering**: Lines are sorted top-to-bottom by Y-coordinate
 3. **Character Ordering**: Within each line, characters are sorted left-to-right by X-coordinate
 4. **Text Assembly**: Lines are concatenated in order to form the final text
@@ -648,7 +652,7 @@ The `YoloOCREngine::assembleText()` method includes multi-line clustering:
 ### Example Flow
 
 1. Detection identifies `code_container_h` with high confidence
-2. Crop extracted with uniform 1.25x padding
+2. Crop extracted with uniform 20px padding
 3. Letterboxed to 320x320 for OCR model
 4. YOLO OCR detects all 11 characters across 2 lines
 5. Multi-line assembly reconstructs: "ABCU1234567"

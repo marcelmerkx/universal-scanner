@@ -82,6 +82,8 @@ debug_images/*
 android/src/main/assets/*
 example/debug_images/*
 example/debug_images/onnx_debug/*
+detection/containerdoors/*
 
 # sample app for piggybacking
 ContainerCameraApp/
+resize_genymotion_images.sh

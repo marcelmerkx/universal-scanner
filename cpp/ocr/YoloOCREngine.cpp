@@ -238,36 +238,148 @@ float YoloOCREngine::calculateIoU(const CharBox& a, const CharBox& b) {
     return (union_area > 0) ? (inter_area / union_area) : 0;
 }
 
+std::string YoloOCREngine::assembleHorizontalContainerText(std::vector<CharBox>& boxes) {
+    if (boxes.empty()) return "";
+    
+    // Group characters by lines (Y coordinate)
+    // Use a tolerance for grouping characters on the same line
+    float lineToleranceRatio = 0.3f; // 30% of average character height
+    
+    // Calculate average character height for line grouping
+    float avgHeight = 0.0f;
+    for (const auto& box : boxes) {
+        avgHeight += box.h;
+    }
+    avgHeight /= boxes.size();
+    float lineTolerance = avgHeight * lineToleranceRatio;
+    
+    // Group characters into lines
+    std::vector<std::vector<CharBox>> lines;
+    for (const auto& box : boxes) {
+        bool addedToLine = false;
+        
+        // Try to add to existing line
+        for (auto& line : lines) {
+            if (!line.empty()) {
+                float lineY = line[0].y; // Use first character's Y as line reference
+                if (std::abs(box.y - lineY) <= lineTolerance) {
+                    line.push_back(box);
+                    addedToLine = true;
+                    break;
+                }
+            }
+        }
+        
+        // Create new line if not added to existing
+        if (!addedToLine) {
+            lines.push_back({box});
+        }
+    }
+    
+    LOGD("Grouped %zu characters into %zu lines for horizontal container", boxes.size(), lines.size());
+    
+    // Sort lines by Y coordinate (top to bottom)
+    std::sort(lines.begin(), lines.end(),
+        [](const std::vector<CharBox>& a, const std::vector<CharBox>& b) {
+            return a[0].y < b[0].y;
+        });
+    
+    // Sort characters within each line by X coordinate (left to right)
+    for (auto& line : lines) {
+        std::sort(line.begin(), line.end(),
+            [](const CharBox& a, const CharBox& b) { return a.x < b.x; });
+    }
+    
+    // Strategy: Be greedy on the top line, only use lower lines if needed
+    std::string result;
+    
+    if (!lines.empty()) {
+        // Always use the first (top) line
+        std::string topLine;
+        for (const auto& box : lines[0]) {
+            topLine += box.character;
+        }
+        result = topLine;
+        
+        LOGD("Top line: '%s' (%zu chars)", topLine.c_str(), topLine.length());
+        
+        // Only use additional lines if top line is insufficient for container code
+        // Container codes need at least 4 characters (owner code like "ABCU")
+        // and ideally 11 characters total (full ISO 6346)
+        if (topLine.length() < 4 && lines.size() > 1) {
+            LOGD("Top line insufficient (%zu chars), checking second line", topLine.length());
+            
+            std::string secondLine;
+            for (const auto& box : lines[1]) {
+                secondLine += box.character;
+            }
+            
+            LOGD("Second line: '%s' (%zu chars)", secondLine.c_str(), secondLine.length());
+            
+            // Combine lines, but limit total to 11 characters
+            std::string combined = topLine + secondLine;
+            if (combined.length() > 11) {
+                combined = combined.substr(0, 11);
+            }
+            result = combined;
+            
+            LOGD("Combined result: '%s'", result.c_str());
+        }
+    }
+    
+    // Final limit: ISO 6346 containers are max 11 characters
+    if (result.length() > 11) {
+        result = result.substr(0, 11);
+        LOGD("Truncated to 11 characters: '%s'", result.c_str());
+    }
+    
+    LOGD("Final horizontal container text: '%s'", result.c_str());
+    return result;
+}
+
 std::string YoloOCREngine::assembleText(
     std::vector<CharBox>& boxes,
     const std::string& classType
 ) {
-    // Sort based on code type
     if (classType == "code_container_v") {
         // Vertical container: sort by Y coordinate (top to bottom)
         std::sort(boxes.begin(), boxes.end(),
             [](const CharBox& a, const CharBox& b) { return a.y < b.y; });
         LOGD("Sorting characters vertically (top to bottom) for %s", classType.c_str());
+        
+        // For containers: limit to 11 characters (ISO 6346)
+        if (boxes.size() > 11) {
+            boxes.resize(11);
+        }
+        
+        // Build text
+        std::string text;
+        for (const auto& box : boxes) {
+            text += box.character;
+        }
+        
+        LOGD("Assembled text: %s", text.c_str());
+        return text;
+        
+    } else if (classType == "code_container_h") {
+        // Horizontal container: multi-line assembly with greedy top line
+        return assembleHorizontalContainerText(boxes);
+        
     } else {
-        // Horizontal container and others: sort by X coordinate (left to right)
+        // Other types: simple left-to-right sorting
         std::sort(boxes.begin(), boxes.end(),
             [](const CharBox& a, const CharBox& b) { return a.x < b.x; });
         LOGD("Sorting characters horizontally (left to right) for %s", classType.c_str());
+        
+        // Build text
+        std::string text;
+        for (const auto& box : boxes) {
+            text += box.character;
+        }
+        
+        LOGD("Assembled text: %s", text.c_str());
+        return text;
     }
-    
-    // For containers: limit to 11 characters (ISO 6346)
-    if (classType.find("container") != std::string::npos && boxes.size() > 11) {
-        boxes.resize(11);
-    }
-    
-    // Build text
-    std::string text;
-    for (const auto& box : boxes) {
-        text += box.character;
-    }
-    
-    LOGD("Assembled text: %s", text.c_str());
-    return text;
 }
 
 float YoloOCREngine::calculateConfidence(const std::vector<CharBox>& boxes) {

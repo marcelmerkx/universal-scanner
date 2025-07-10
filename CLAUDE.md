@@ -218,6 +218,10 @@ static facebook::jsi::Value universalScanner(
 
 - The ONNX weights "unified-detection-v7.onnx" are working fine. but the ONNX runtime output is complex. when we get a misreading, it is most likely we either have bad input or we're not processing the ONNX results well.
 
+## Discovery Memories
+
+- **Code Orientation Clarification**: the vertical and horizontal containers are identical in terms of orientation. In fact, all items in our scope, **except the seal** will have a "portrait" view, while we will receive frames in "landscape" mode. So the horizontal container should be treated in the same manner as the vertical one: we need a rotation!
+
 # important-instruction-reminders
 Do what has been asked; nothing more, nothing less.
 NEVER create files unless they're absolutely necessary for achieving your goal.
