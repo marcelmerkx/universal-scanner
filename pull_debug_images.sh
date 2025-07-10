@@ -38,7 +38,7 @@ for DEVICE in $DEVICES; do
     
     # List OCR files on device (now with type prefix)
     echo "🔍 Finding OCR images..."
-    OCR_FILES=$($ADB_CMD shell "ls /sdcard/Download/onnx_debug/*_*_ocr_*.jpg 2>/dev/null" | tr -d '\r')
+    OCR_FILES=$($ADB_CMD shell "ls /sdcard/Download/onnx_debug/*.jpg 2>/dev/null" | tr -d '\r')
     # OCR_FILES=$($ADB_CMD shell "ls /sdcard/Download/onnx_debug/*.jpg 2>/dev/null" | tr -d '\r')
     
     if [ -z "$OCR_FILES" ]; then
@@ -48,7 +48,7 @@ for DEVICE in $DEVICES; do
     
     # Count files
     FILE_COUNT=$(echo "$OCR_FILES" | wc -l | tr -d ' ')
-    echo "📊 Found $FILE_COUNT OCR images"
+    echo "📊 Found $FILE_COUNT images"
     
     # Pull OCR images
     echo "📥 Downloading..."
@@ -61,7 +61,7 @@ for DEVICE in $DEVICES; do
     $ADB_CMD shell "rm -rf /sdcard/Download/onnx_debug"
     
     # Show results for this device
-    DOWNLOADED=$(ls "$OUTPUT_DIR"/*_*_ocr_*.jpg 2>/dev/null | wc -l | tr -d ' ')
+    DOWNLOADED=$(ls "$OUTPUT_DIR"/*.jpg 2>/dev/null | wc -l | tr -d ' ')
     TOTAL_IMAGES=$((TOTAL_IMAGES + DOWNLOADED))
     
     echo "✅ Downloaded $DOWNLOADED images to $OUTPUT_DIR/"
@@ -69,7 +69,7 @@ for DEVICE in $DEVICES; do
     # Show most recent files
     if [ "$DOWNLOADED" -gt 0 ]; then
         echo "📸 Most recent images:"
-        ls -lt "$OUTPUT_DIR"/*_*_ocr_*.jpg 2>/dev/null | head -5 | awk '{print "   " $9}'
+        ls -lt "$OUTPUT_DIR"/*_*.jpg 2>/dev/null | head -5 | awk '{print "   " $9}'
     fi
 done
 

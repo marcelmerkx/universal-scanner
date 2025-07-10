@@ -13,7 +13,12 @@
 
 #define LOG_TAG "OnnxProcessorV2"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
-#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+
+#ifdef NDEBUG
+  #define LOGD(...) ((void)0)
+#else
+  #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+#endif
 
 namespace UniversalScanner {
 
@@ -81,7 +86,8 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processFrameWithOCR(
 
 std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetection(
     const DetectionResult& detectionResult,
-    int width, int height,
+    int width, 
+    int height,
     const uint8_t* frameData, size_t frameSize
 ) {
     std::vector<universalscanner::ScanResult> results;
@@ -90,79 +96,69 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
         return results;
     }
     
-    // ====== COORDINATE CONVERSION (as per detection_to_ocr_pipeline_fix.md) ======
+    // ====== STEP 1: COORDINATE CONVERSION (as per detection_to_ocr_pipeline_fix.md) ======
     // Detection outputs normalized coordinates, we need to map to frame space
-    
-    // Step 1: Rotate detection coordinates (swap x/y)
-    float rotated_x = detectionResult.centerY;  // Y becomes X
-    float rotated_y = detectionResult.centerX;  // X becomes Y  
-    float rotated_w = detectionResult.height;   // Height becomes Width
-    float rotated_h = detectionResult.width;    // Width becomes Height
-    
-    // Step 2: Determine frame size (use max dimension)
-    int maxFrameDimension = std::max(width, height);  // max(1280, 720) = 1280
-    
-    // Step 3: Denormalize to pixel coordinates
-    // Note: Detection gives center coords, we need top-left
-    float centerX = rotated_x * maxFrameDimension;
-    float centerY = rotated_y * maxFrameDimension;
-    float boxWidth = rotated_w * maxFrameDimension;
-    float boxHeight = rotated_h * maxFrameDimension;
-    
-    // Convert from center to top-left
-    int x_original = static_cast<int>(centerX - boxWidth / 2);
-    int y_original = static_cast<int>(centerY - boxHeight / 2);
-    int w_original = static_cast<int>(boxWidth);
-    int h_original = static_cast<int>(boxHeight);
-    
-    // Add padding: 100px to width (as per spec) plus 20px to height (10px top/bottom)
-    // remember we have not yet rotated, so we need to swap width/height
-    int padding_width = 20;
-    int padding_height = 80;
-    
-    // But first, check how much padding we can actually add without going out of bounds
-    // Calculate how much we can expand in each direction
-    int expand_left = std::min(padding_width / 2, x_original);
-    int expand_right = std::min(padding_width / 2, width - (x_original + w_original));
-    int expand_top = std::min(padding_height / 2, y_original);
-    int expand_bottom = std::min(padding_height / 2, height - (y_original + h_original));
-    
-    // Apply the padding
-    x_original -= expand_left;
-    w_original += expand_left + expand_right;
-    y_original -= expand_top;
-    h_original += expand_top + expand_bottom;
-    
     LOGD("📐 Coordinate conversion per spec:");
     LOGD("📐   Input: norm(%.3f,%.3f,%.3f,%.3f)", 
          detectionResult.centerX, detectionResult.centerY, 
          detectionResult.width, detectionResult.height);
+    
+    // 1: Rotate detection coordinates (swap x/y)
+    float rotated_x = detectionResult.centerY;  // Y becomes X
+    float rotated_y = detectionResult.centerX;  // X becomes Y  
+    float rotated_w = detectionResult.height;   // Height becomes Width
+    float rotated_h = detectionResult.width;    // Width becomes Height
     LOGD("📐   Rotated: (%.3f,%.3f,%.3f,%.3f)",
          rotated_x, rotated_y, rotated_w, rotated_h);
-    LOGD("📐   FrameSize: %d (max of %dx%d)", maxFrameDimension, width, height);
-    LOGD("📐   Before padding: (%d,%d,%d,%d)",
-         x_original + expand_left, y_original + expand_top, 
-         w_original - expand_left - expand_right, h_original - expand_top - expand_bottom);
-    LOGD("📐   After padding: (%d,%d,%d,%d) in frame space",
-         x_original, y_original, w_original, h_original);
     
-    // Final safety check - clamp to frame bounds
-    x_original = std::max(0, x_original);
-    y_original = std::max(0, y_original);
-    w_original = std::min(w_original, width - x_original);
-    h_original = std::min(h_original, height - y_original);
+    // 2: Determine frame size (use max dimension)
+    int maxFrameDimension = std::max(width, height);  // max(1280, 720) = 1280
+    int virtualPaddingSpace = maxFrameDimension - std::min(width, height);
+    LOGD("📐   FrameSize: %d (max of %dx%d) with virtual padding of: %d", maxFrameDimension, width, height, virtualPaddingSpace);
     
+    // 3: Denormalize to pixel coordinates
+    float centerX = rotated_x * maxFrameDimension;
+    float centerY = (1 - rotated_y) * maxFrameDimension - virtualPaddingSpace; // work from the top down, so invert Y
+    float boxWidth = rotated_w * maxFrameDimension;
+    float boxHeight = rotated_h * maxFrameDimension;
+    LOGD("📐   Before padding: (%.0f,%.0f,%.0f,%.0f)", centerX, centerY, boxWidth, boxHeight);
+
+    // ====== STEP 2: CROP FOR OCR (as per detection_to_ocr_pipeline_fix.md) ======
+    // Add padding using helper function
+    int padding_width = 20; // attention! because of rotation, wider means more height on the frame!
+    int padding_height = 20;
+ 
+    int w_padded = boxWidth + padding_width;
+    int h_padded = boxHeight + padding_height;
+
+    LOGD("📐   After padding: (%.0f,%.0f,%d,%d) in center frame space",
+         centerX, centerY, w_padded, h_padded);
+
+    // box edges for troubleshooting
+    float halfW = w_padded / 2.0f;
+    float halfH = h_padded / 2.0f;
+
+    int minX = static_cast<int>(centerX - halfW);
+    int minY = static_cast<int>(centerY - halfH);
+    int maxX = static_cast<int>(centerX + halfW - 1);
+    int maxY = static_cast<int>(centerY + halfH - 1);
+
+    LOGD("📐   After padding: (%d,%d,%d,%d) box edges",
+         minX, minY, maxX, maxY);
+
     // Ensure dimensions are even for YUV420 format
-    if (w_original % 2 == 1) w_original--;
-    if (h_original % 2 == 1) h_original--;
-    if (x_original % 2 == 1) x_original++;
-    if (y_original % 2 == 1) y_original++;
+    if (w_padded % 2 == 1) w_padded--;
+    if (h_padded % 2 == 1) h_padded--;
+    int centerX_int = static_cast<int>(centerX);
+    int centerY_int = static_cast<int>(centerY);
+    if (centerX_int % 2 == 1) centerX_int++;
+    if (centerY_int % 2 == 1) centerY_int++;
     
     universalscanner::BoundingBox cropBox;
-    cropBox.x = x_original;
-    cropBox.y = y_original;
-    cropBox.width = w_original;
-    cropBox.height = h_original;
+        cropBox.x = centerX_int - w_padded / 2;
+        cropBox.y = centerY_int - h_padded / 2;
+        cropBox.width = w_padded;
+        cropBox.height = h_padded;
     
     std::string classType = getClassType(detectionResult.classIndex);
     LOGD("🎯 Final crop region: (%d,%d,%d,%d) for %s",
@@ -312,10 +308,10 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
         result.confidence = ocrResult.confidence;
         result.model = "yolo-ocr-v7-640";
         result.bbox = {
-            static_cast<float>(x_original),
-            static_cast<float>(y_original),
-            static_cast<float>(w_original),
-            static_cast<float>(h_original)
+            static_cast<float>(cropBox.x),
+            static_cast<float>(cropBox.y),
+            static_cast<float>(cropBox.width),
+            static_cast<float>(cropBox.height)
         };
         
         results.push_back(result);
@@ -344,8 +340,10 @@ std::string OnnxProcessorV2::getClassType(int classIndex) {
 
 
 std::vector<uint8_t> OnnxProcessorV2::extractYuvCrop(
-    const uint8_t* frameData, size_t frameSize,
-    int frameWidth, int frameHeight,
+    const uint8_t* frameData, 
+    size_t frameSize,
+    int frameWidth, 
+    int frameHeight,
     const universalscanner::BoundingBox& bbox
 ) {
     // Validate input parameters
@@ -416,6 +414,41 @@ std::vector<uint8_t> OnnxProcessorV2::extractYuvCrop(
     
     LOGD("✂️ Extracted YUV crop: %dx%d from frame %dx%d", bbox.width, bbox.height, frameWidth, frameHeight);
     return croppedData;
+}
+
+universalscanner::BoundingBox OnnxProcessorV2::getPaddedBox(
+    const universalscanner::BoundingBox& bbox,
+    int frameWidth, int frameHeight,
+    int paddingWidth, int paddingHeight
+) {
+    // Note: bbox uses x,y as top-left corner, but we have centerX/centerY
+    // So we'll work with center coordinates
+    float centerX = bbox.x + bbox.width / 2.0f;
+    float centerY = bbox.y + bbox.height / 2.0f;
+    
+    // Calculate the original edges
+    float halfWidth = bbox.width / 2.0f;
+    float halfHeight = bbox.height / 2.0f;
+
+    float xMin = centerX - halfWidth - paddingWidth;
+    float xMax = centerX + halfWidth + paddingWidth;
+    float yMin = centerY - halfHeight - paddingHeight;
+    float yMax = centerY + halfHeight + paddingHeight;
+
+    // Clamp to frame bounds
+    xMin = std::max(0.0f, xMin);
+    yMin = std::max(0.0f, yMin);
+    xMax = std::min(static_cast<float>(frameWidth - 1), xMax);
+    yMax = std::min(static_cast<float>(frameHeight - 1), yMax);
+
+    // Return new bounding box
+    universalscanner::BoundingBox paddedBox;
+    paddedBox.x = static_cast<int>(xMin);
+    paddedBox.y = static_cast<int>(yMin);
+    paddedBox.width = static_cast<int>(xMax - xMin);
+    paddedBox.height = static_cast<int>(yMax - yMin);
+    
+    return paddedBox;
 }
 
 } // namespace UniversalScanner

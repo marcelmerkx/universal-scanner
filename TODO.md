@@ -11,6 +11,9 @@ model: 'unified-detection-v7.tflite'
 
 [ ] definition of "stages" "phases" and "steps" for our logs. Make it structured , maybe coded so we know what we're looking at in the adb logs when working verbosely
 
+[ ] nativeProcessFrameWithData rename width and height to frameWidth and frameHeight from hereon.
+
 [ ] ide errors 
 
 [ ] ios
+

@@ -148,7 +148,7 @@ public class UniversalScannerFrameProcessorPlugin extends FrameProcessorPlugin {
                 }
                 
                 Log.i(TAG, "Processing frame: " + width + "x" + height);
-                Log.i(TAG, "Calling nativeProcessFrameWithData with real Frame object");
+                Log.i(TAG, "Calling nativeProcessFrame with real Frame object");
                 
                 // Handle debug images argument
                 if (arguments != null && arguments.containsKey("debugImages")) {

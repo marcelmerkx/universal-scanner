@@ -3,7 +3,11 @@
 #include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
 
-#define LOGF(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "UniversalScanner", fmt, ##__VA_ARGS__)
+#ifdef NDEBUG
+  #define LOGF(fmt, ...) ((void)0)
+#else
+  #define LOGF(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "UniversalScanner", fmt, ##__VA_ARGS__)
+#endif
 
 // Use getClassName from Universal.cpp to avoid duplicate symbol
 extern const char* getClassName(int classIdx);
@@ -345,6 +349,9 @@ std::vector<uint8_t> OnnxProcessor::preprocessFrame(const uint8_t* frameData, si
     }
     
     // Ensure even dimensions for YUV 4:2:0 format
+    // The operation & 0xFFFE is a bitwise AND with 
+    // 11111111111111111111111111111110 in binary, 
+    // which forces the last bit to 0, making any odd number even
     targetWidth = targetWidth & 0xFFFE;
     targetHeight = targetHeight & 0xFFFE;
     
@@ -545,20 +552,20 @@ DetectionResult OnnxProcessor::findBestDetection(const std::vector<float>& model
         if (maxClassProb > 0.1f) validAnchors++;
         if (maxClassProb > 0.5f) highConfidenceAnchors++;
         
-        if (maxClassProb > bestConfidence && maxClassProb > 0.55f) {
+        if (maxClassProb > bestConfidence && maxClassProb > 0.50f) {
             bestConfidence = maxClassProb;
             bestAnchor = a;
             bestClass = classIdx;
             
             // Log promising detections
-            if (maxClassProb > 0.6f) {
+            if (maxClassProb > 0.5f) {
                 LOGF("🎯 High confidence anchor %zu: class=%d, conf=%.3f, bbox=(%.3f,%.3f,%.3f,%.3f)", 
                      a, classIdx, maxClassProb, getVal(a, 0), getVal(a, 1), getVal(a, 2), getVal(a, 3));
             }
         }
     }
     
-    LOGF("📊 Detection stats: %d valid (>0.1), %d high-conf (>0.5), %d passed threshold (>0.55)", 
+    LOGF("📊 Detection stats: %d valid (>0.1), %d high-conf (>0.5), %d valid best confidence (>0.5)", 
          validAnchors, highConfidenceAnchors, (bestConfidence > 0.0f ? 1 : 0));
     
     // We already initialized result at the beginning with hasDetection = false
@@ -576,7 +583,7 @@ DetectionResult OnnxProcessor::findBestDetection(const std::vector<float>& model
              result.classIndex, getCodeDetectionClassName(detectionType), result.confidence, 
              result.centerX, result.centerY, result.width, result.height);
     } else {
-        LOGF("❌ No detection found above threshold 0.55 for enabled types mask: 0x%02X", enabledCodeTypesMask);
+        LOGF("❌ No detection found above threshold 0.5 for enabled types mask: 0x%02X", enabledCodeTypesMask);
         LOGF("💡 Best found was: conf=%.3f (anchor %zu)", bestConfidence, bestAnchor);
     }
     

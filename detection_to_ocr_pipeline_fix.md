@@ -54,11 +54,11 @@ h = 0.037 * 1280 + 100 = 147 // temporarily, we will increase the h with 100px t
 ### STEP 2: cropForOcr
 **Explanation**: this takes the actual correctly spaced coordinates x,y,w,h and crops the frame to that
 
-**input**: YUVframe , coordinateConversion.output
+**input**: YUVframe , coordinateConversion.output, paddingHeight, paddingWidth
 
 **output**: YUVframeCropped -> this is a high-resolution frame from the original
 
-**Example**: we input the 1280 x 720 frame and we get a 588 x 147 YUV format back
+**Example**: we input the 1280 x 720 frame and we get a padded 588 x 147 YUV format back
 
 ### STEP 3: convertYuvToRgbForOcr
 **Explanation**: converts from YUV to RGB format

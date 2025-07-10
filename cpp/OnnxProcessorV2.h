@@ -75,9 +75,20 @@ private:
     
     // Extract YUV crop from original frame
     std::vector<uint8_t> extractYuvCrop(
-        const uint8_t* frameData, size_t frameSize,
-        int frameWidth, int frameHeight,
+        const uint8_t* frameData, 
+        size_t frameSize,
+        int frameWidth, 
+        int frameHeight,
         const universalscanner::BoundingBox& bbox
+    );
+    
+    // Calculate padded bounding box with bounds checking
+    universalscanner::BoundingBox getPaddedBox(
+        const universalscanner::BoundingBox& bbox,
+        int frameWidth = 1280, 
+        int frameHeight = 1280,
+        int paddingWidth = 20, 
+        int paddingHeight = 20
     );
 };
 
