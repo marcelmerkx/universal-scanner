@@ -1,0 +1,105 @@
+SELECT
+    ('https://media.cargosnap.net/thumbnails/sm/tenant' + CONVERT(varchar(4), x.tenant_id) + '/' + x.image_path) as path
+FROM
+    cargosnapdb.dbo.snaps x
+WHERE
+    document_type_id IS NOT NULL
+    AND deleted_at IS NULL
+    AND upload_type = 'document'
+ORDER BY
+    x.id DESC
+
+
+# GET container cutouts:
+
+SELECT top 1000
+    ('https://media.cargosnap.net/thumbnails/sm/tenant' + CONVERT(varchar(4), x.tenant_id) + '/' + x.image_path) as url,
+    scan_code as reference
+FROM
+    cargosnapdb.dbo.files_cutouts x
+WHERE
+ 	scan_code like '___U_______'
+	AND created_at > '2025-06-01'
+    AND deleted_at IS NULL
+ORDER BY
+    x.id DESC
+	
+	
+	
+
+SELECT
+    wfs.id
+FROM
+	cargosnapdb.dbo.workflows_steps wfs
+JOIN
+	tenants t on t.id = wfs.tenant_id
+WHERE
+	wfs.deleted_at IS NULL
+	AND wfs.[type] = 'containerTag'
+	AND wfs.data LIKE '%"horizontal":false%'
+	AND t.id not in (1,20)
+	AND t.status in ('standard', 'enterprise')
+
+
+
+
+SELECT 
+	TOP 20 
+	('https://media.cargosnap.net/thumbnails/sm/tenant' + CONVERT(varchar(4), s.tenant_id) + '/' + s.image_path) as path
+FROM	
+	cargosnapdb.dbo.snaps s 
+WHERE 
+	s.workflow_step_id in (3178,3805,5704,5791,6679,8013,8026,10763,10818,10862,11595,13185,13196,14029,15917,16346,16736,17019,17091,17122,17208,17236,18005,19107,19148,19345,19392,21532,21552,22004,23814,23946,25432,25538,25585,25792,26112,26188,27676,28156,29907,32061,32076,32598,32915,37066,37837,40095,40436)
+	and s.deleted_at is null
+
+	
+# get the workflows where vertical scans are done. for a tenant with high nr of such scans:
+
+SELECT TOP 200 x.* FROM cargosnapdb.dbo.workflows_steps x WHERE deleted_at IS NULL AND [type] = 'containerTag' AND data LIKE '%"horizontal":false%' AND tenant_id = 420
+	
+
+# plug those workflows here to get the output for 'vertical.txt'
+# this gets the image AND the code
+SELECT 
+	('https://media.cargosnap.net/thumbnails/sm/tenant' + CONVERT(varchar(4), s.tenant_id) + '/' + s.image_path) as path,
+	f.value as reference
+FROM	
+	cargosnapdb.dbo.snaps s
+	LEFT JOIN files_tags f on f.snap_id = s.id 
+WHERE 
+	s.tenant_id = 420
+	and s.workflow_step_id in (3805,8013,10862,13185,19392,21532,21552,22004,28156,32061,32076)
+	and s.deleted_at is null
+	and f.tenant_id = 420
+	
+
+here the counts of probably used the vertical scanner:
+
+SELECT 
+    s.tenant_id,
+    COUNT(s.id) as snap_count
+FROM	
+    cargosnapdb.dbo.snaps s 
+WHERE 
+    s.id > 120000000
+	AND s.workflow_step_id IN (
+        SELECT
+            wfs.id
+        FROM
+            cargosnapdb.dbo.workflows_steps wfs
+        JOIN
+            cargosnapdb.dbo.tenants t on t.id = wfs.tenant_id
+        WHERE
+            wfs.deleted_at IS NULL
+            AND wfs.[type] = 'containerTag'
+            AND wfs.data LIKE '%"horizontal":false%'
+            AND t.id NOT IN (1,20)
+            AND t.status IN ('standard', 'enterprise')
+    )
+    AND s.deleted_at IS NULL
+    AND s.created_at > '2025-01-01'
+GROUP BY 
+    s.tenant_id
+ORDER BY 
+    snap_count DESC
+	

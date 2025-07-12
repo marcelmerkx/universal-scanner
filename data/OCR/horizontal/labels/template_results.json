@@ -1,0 +1,102 @@
+[
+  {
+    "status": "success",
+    "image": "AMFU3211042.jpg",
+    "yolo_detections": 18,
+    "final_boxes": 11,
+    "template_size": [
+      17.0,
+      25.0
+    ]
+  },
+  {
+    "status": "success",
+    "image": "AMFU8908955.jpg",
+    "yolo_detections": 8,
+    "final_boxes": 11,
+    "template_size": [
+      16.5,
+      24.5
+    ]
+  },
+  {
+    "status": "success",
+    "image": "AMFU8950723.jpg",
+    "yolo_detections": 8,
+    "final_boxes": 11,
+    "template_size": [
+      20.5,
+      32.0
+    ]
+  },
+  {
+    "status": "success",
+    "image": "APHU6377338.jpg",
+    "yolo_detections": 9,
+    "final_boxes": 11,
+    "template_size": [
+      21.0,
+      32.0
+    ]
+  },
+  {
+    "status": "success",
+    "image": "APHU6432306.jpg",
+    "yolo_detections": 10,
+    "final_boxes": 11,
+    "template_size": [
+      16.5,
+      24.5
+    ]
+  },
+  {
+    "status": "success",
+    "image": "APHU6562110.jpg",
+    "yolo_detections": 8,
+    "final_boxes": 11,
+    "template_size": [
+      21.5,
+      33.0
+    ]
+  },
+  {
+    "status": "success",
+    "image": "APHU6686445.jpg",
+    "yolo_detections": 10,
+    "final_boxes": 11,
+    "template_size": [
+      20.0,
+      31.5
+    ]
+  },
+  {
+    "status": "success",
+    "image": "APHU6774593.jpg",
+    "yolo_detections": 17,
+    "final_boxes": 11,
+    "template_size": [
+      18.0,
+      26.0
+    ]
+  },
+  {
+    "status": "success",
+    "image": "APHU6831076.jpg",
+    "yolo_detections": 10,
+    "final_boxes": 11,
+    "template_size": [
+      19.0,
+      24.0
+    ]
+  },
+  {
+    "status": "success",
+    "image": "APZU3160824.jpg",
+    "yolo_detections": 13,
+    "final_boxes": 11,
+    "template_size": [
+      17.0,
+      27.0
+    ]
+  }
+]

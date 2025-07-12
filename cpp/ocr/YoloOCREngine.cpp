@@ -68,7 +68,7 @@ YoloOCREngine::OCRResult YoloOCREngine::recognize(
     LOGD("🔤 Found %zu character boxes", boxes.size());
     
     // 4. Apply NMS
-    boxes = runNMS(boxes, 0.45f);  // IoU threshold from ContainerCameraApp
+    boxes = runNMS(boxes, 0.6f);
     
     // 5. Assemble text
     auto text = assembleText(boxes, classType);
@@ -157,7 +157,8 @@ std::vector<YoloOCREngine::CharBox> YoloOCREngine::parseYoloOutput(
             }
         }
         
-        if (maxProb > 0.25f) {  // Confidence threshold from ContainerCameraApp
+        if (maxProb > 0.6f) {  // Confidence threshold
+            LOGD("NMS-filter %zu prob YOLO output", maxProb);
             CharBox box;
             
             // Extract bbox coordinates

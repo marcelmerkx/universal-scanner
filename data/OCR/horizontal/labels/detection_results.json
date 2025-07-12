@@ -1,0 +1,92 @@
+[
+  {
+    "status": "success",
+    "image": "AMFU3211042.jpg",
+    "boxes_found": 11,
+    "strategies": {
+      "yolo": 18,
+      "contour": 14
+    }
+  },
+  {
+    "status": "success",
+    "image": "AMFU8908955.jpg",
+    "boxes_found": 11,
+    "strategies": {
+      "yolo": 8,
+      "contour": 16
+    }
+  },
+  {
+    "status": "success",
+    "image": "AMFU8950723.jpg",
+    "boxes_found": 9,
+    "strategies": {
+      "yolo": 8,
+      "contour": 3
+    }
+  },
+  {
+    "status": "success",
+    "image": "APHU6377338.jpg",
+    "boxes_found": 11,
+    "strategies": {
+      "yolo": 9,
+      "contour": 11
+    }
+  },
+  {
+    "status": "success",
+    "image": "APHU6432306.jpg",
+    "boxes_found": 11,
+    "strategies": {
+      "yolo": 10,
+      "contour": 7
+    }
+  },
+  {
+    "status": "success",
+    "image": "APHU6562110.jpg",
+    "boxes_found": 11,
+    "strategies": {
+      "yolo": 8,
+      "contour": 13
+    }
+  },
+  {
+    "status": "success",
+    "image": "APHU6686445.jpg",
+    "boxes_found": 8,
+    "strategies": {
+      "yolo": 10,
+      "contour": 12
+    }
+  },
+  {
+    "status": "success",
+    "image": "APHU6774593.jpg",
+    "boxes_found": 11,
+    "strategies": {
+      "yolo": 17,
+      "contour": 14
+    }
+  },
+  {
+    "status": "success",
+    "image": "APHU6831076.jpg",
+    "boxes_found": 11,
+    "strategies": {
+      "yolo": 10,
+      "contour": 11
+    }
+  },
+  {
+    "status": "success",
+    "image": "APZU3160824.jpg",
+    "boxes_found": 9,
+    "strategies": {
+      "yolo": 13,
+      "contour": 2
+    }
+  }
+]

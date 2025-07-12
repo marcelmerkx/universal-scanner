@@ -76,14 +76,23 @@ android/src/main/cpp/lib
 .env
 
 # training data and models
-detection/notebooks/runs/*
-detection/notebooks/Unified-detection-*
+data/detection/notebooks/runs/*
+data/detection/notebooks/Unified-detection-*
 debug_images/*
 android/src/main/assets/*
 example/debug_images/*
 example/debug_images/onnx_debug/*
-detection/containerdoors/*
+data/detection/containerdoors/*
+
+data/OCR/cutouts/*
+data/OCR/labels/*
+data/OCR/models
+data/OCR/*.csv
+models/*
+data/OCR/horizontal/images/*.jpg
+*.log
 
 # sample app for piggybacking
 ContainerCameraApp/
 resize_genymotion_images.sh
+auto_labeling.log
