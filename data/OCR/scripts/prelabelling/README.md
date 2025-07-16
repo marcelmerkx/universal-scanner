@@ -68,7 +68,7 @@ python container_ocr_auto_labeler.py \
 
 ### 1. **Image Processing**
 - Loads images in batches for efficient processing
-- Runs inference using your existing vertical OCR model
+- Runs inference using our existing vertical OCR model
 - Applies initial confidence filtering
 
 ### 2. **Vertical Container Constraints**

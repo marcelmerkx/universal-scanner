@@ -58,9 +58,9 @@ from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 
 # Default paths
-DEFAULT_CSV_FILE = "detection/training_data/00_raw/containers.csv"
-DEFAULT_OUTPUT_DIR = Path("detection/training_data/00_raw/container_code_tbd")
-LOG_DIR = Path("detection/logs")
+DEFAULT_CSV_FILE = "data/detection/training_data/extracontainersq.csv"
+DEFAULT_OUTPUT_DIR = Path("data/detection/training_data/10_raw/container_code_tbd")
+LOG_DIR = Path("data/detection/logs")
 
 # Configuration
 REQUEST_TIMEOUT = 30  # seconds

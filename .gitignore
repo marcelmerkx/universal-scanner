@@ -83,6 +83,9 @@ android/src/main/assets/*
 example/debug_images/*
 example/debug_images/onnx_debug/*
 data/detection/containerdoors/*
+data/detection/training_data/*.csv
+data/detection/training_data/*
+data/OCR/training_data/*
 
 data/OCR/cutouts/*
 data/OCR/labels/*

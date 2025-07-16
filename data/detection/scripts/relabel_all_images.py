@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Re-label all images in the 01_labelled folder.
+Re-label all images in the 01_labelled folder for their DETECTIONS (6 classes).
 
 This script:
 1. Finds all images in data/detection/training_data/01_labelled/images
@@ -30,6 +30,7 @@ except ImportError:
 
 # Configuration
 LABELLED_DIR = Path("data/detection/training_data/01_labelled")
+# LABELLED_DIR = Path("data/detection/containerdoors")
 DEFAULT_MODEL_PATH = Path("data/detection/models/detection_320_grayscale_tilted-09-07-2025.pt")
 LOG_DIR = Path("data/detection/logs")
 
@@ -308,7 +309,7 @@ def main():
     parser.add_argument(
         "--confidence",
         type=float,
-        default=0.5,
+        default=0.2,
         help="Confidence threshold for detections (higher = stricter, better quality labels)"
     )
     

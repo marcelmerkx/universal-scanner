@@ -1,6 +1,8 @@
 
 [ ] run the better detection model (v10 training), but based on black/white
 
+[ ] put the "current best" model in .env and make scripts use that. improves re-usability!
+
 [ ] deal with some artefacts: 
 ``` 
 type: 'code_' + classNames[bestClass]
