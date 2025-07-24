@@ -29,7 +29,7 @@ except ImportError:
     exit(1)
 
 # Configuration
-CHARACTERS_DIR = Path("data/detection/training_data/11_characters_extra")
+CHARACTERS_DIR = Path("data/OCR/training_data/11_extra_containers")
 DEFAULT_MODEL_PATH = Path("data/detection/models/character-detection-10-06-25.pt")
 LOG_DIR = Path("data/detection/logs")
 

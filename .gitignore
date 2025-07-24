@@ -93,6 +93,7 @@ data/OCR/models
 data/OCR/*.csv
 models/*
 data/OCR/horizontal/images/*.jpg
+data/detection/temp_downloads/*
 *.log
 
 # sample app for piggybacking

@@ -119,6 +119,14 @@ def upload_all_images(api_key: str, workspace: str, project_id: str,
     rf = Roboflow(api_key=api_key)
     project = rf.workspace().project(project_id)
     
+    # Define labelmap for OCR classes (0-9 digits, 10-35 letters A-Z)
+    labelmap = {i: name for i, name in enumerate([
+        '0','1','2','3','4','5','6','7','8','9',
+        'A','B','C','D','E','F','G','H','I','J',
+        'K','L','M','N','O','P','Q','R','S','T',
+        'U','V','W','X','Y','Z'
+    ])}
+    
     total_images = len(labelled_pairs) + len(unlabelled_images)
     
     stats = {
@@ -139,7 +147,8 @@ def upload_all_images(api_key: str, workspace: str, project_id: str,
     # Phase 1: Upload labelled images with annotations
     if labelled_pairs:
         logger.info(f"\n=== PHASE 1: Uploading {len(labelled_pairs)} labelled images ===")
-        logger.info(f"Using single_upload with image_path + annotation_path")
+        logger.info(f"Using single_upload with image_path + annotation_path + labelmap")
+        logger.info(f"Labelmap: {len(labelmap)} classes (0-9 digits, A-Z letters)")
         
         for batch_start in range(0, len(labelled_pairs), batch_size):
             batch_end = min(batch_start + batch_size, len(labelled_pairs))
@@ -152,10 +161,11 @@ def upload_all_images(api_key: str, workspace: str, project_id: str,
                 logger.info(f"Uploading labelled {idx}/{len(labelled_pairs)}: {image_path.name} + {label_path.name}")
                 
                 try:
-                    # Upload image with corresponding YOLO label
+                    # Upload image with corresponding YOLO label and labelmap
                     result = project.single_upload(
                         image_path=str(image_path),
                         annotation_path=str(label_path),
+                        annotation_labelmap=labelmap,
                         split=split,
                         num_retry_uploads=1
                     )

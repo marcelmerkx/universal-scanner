@@ -10,10 +10,10 @@ ORDER BY
     x.id DESC
 
 
-# GET container cutouts:
+# GET good quality container cutouts:
 
 SELECT top 1000
-    ('https://media.cargosnap.net/thumbnails/sm/tenant' + CONVERT(varchar(4), x.tenant_id) + '/' + x.image_path) as url,
+    ('https://cargosnapstorage.blob.core.windows.net/tenant' + CONVERT(varchar(4), x.tenant_id) + '/' + x.image_path) as url,
     scan_code as reference
 FROM
     cargosnapdb.dbo.files_cutouts x

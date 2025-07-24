@@ -1,49 +1,19 @@
 #!/usr/bin/env python3
 """
-Download Images from CSV for Training Data
+Download Extra Container Images from CSV for Training Data
 
-This script downloads images from URLs listed in a CSV file and saves them
-with normalized filenames in the training data structure.
+This script downloads images from URLs listed in extracontainers.csv and organizes them
+based on whether the URL contains "cropped":
+- URLs containing "cropped" → data/detection/training_data/10_raw/code_container_h
+- All other URLs → data/detection/training_data/10_raw/code_container_tbd
 
 Input: CSV file with columns "url" and "reference"
 
-The input file is generated using this SQL query:
-        SELECT top 5000
-            ('https://media.cargosnap.net/thumbnails/sm/tenant' + CONVERT(varchar(4), x.tenant_id) + '/' + x.image_path) as url,
-            scan_code as reference
-        FROM
-            cargosnapdb.dbo.files_cutouts x
-        WHERE
-            scan_code like '___U_______'     -- For containers
-            -- OR scan_code not like '___U_______'  -- For barcodes/other codes
-            AND created_at > '2025-05-01'
-            AND deleted_at IS NULL
-        ORDER BY
-            x.id DESC
-
-Usage Examples:
-    # Download containers
-    python3 detection/scripts/download_containers.py
+Usage:
+    python3 data/detection/scripts/download_extracontainers.py
     
-    # Download barcodes
-    python3 detection/scripts/download_containers.py \\
-        --csv-file detection/training_data/00_raw/barcodes.csv \\
-        --output-dir detection/training_data/00_raw/code_qr_barcode
-    
-    # Download QR codes with limit
-    python3 detection/scripts/download_containers.py \\
-        --csv-file detection/training_data/00_raw/qr_codes.csv \\
-        --output-dir detection/training_data/00_raw/code_qr \\
-        --limit 100
-
-The script:
-1. Reads CSV file with image URLs and references
-2. Processes references by removing quotes and applying corrections
-3. Downloads images and saves them as {reference}.jpg
-4. Skips duplicates and reports download status
-5. Creates progress tracking and error logs
-
-Note: For container codes, 0 digits in first 3 characters are corrected to O (ISO 6346 standard)
+    # With options
+    python3 data/detection/scripts/download_extracontainers.py --limit 100
 """
 
 import argparse
@@ -58,8 +28,9 @@ from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 
 # Default paths
-DEFAULT_CSV_FILE = "data/detection/training_data/extracontainers.csv"
-DEFAULT_OUTPUT_DIR = Path("data/detection/training_data/10_raw/container_code_tbd")
+DEFAULT_CSV_FILE = Path("data/detection/training_data/extracontainers.csv")
+CROPPED_OUTPUT_DIR = Path("data/detection/training_data/10_raw/code_container_h")
+TBD_OUTPUT_DIR = Path("data/detection/training_data/10_raw/code_container_tbd")
 LOG_DIR = Path("data/detection/logs")
 
 # Configuration
@@ -68,7 +39,7 @@ RETRY_ATTEMPTS = 3
 DELAY_BETWEEN_REQUESTS = 0.1  # seconds to be respectful
 
 # Set up logging
-def setup_logging(log_filename: str = "download_images.log"):
+def setup_logging(log_filename: str = "download_extracontainers.log"):
     """Configure logging to both file and console."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_file = LOG_DIR / log_filename
@@ -149,23 +120,25 @@ def download_image(url: str, output_path: Path, logger: logging.Logger, timeout:
     
     return False
 
-def process_csv_file(csv_file: Path, output_dir: Path, limit: Optional[int], logger: logging.Logger, timeout: int = REQUEST_TIMEOUT):
+def process_csv_file(csv_file: Path, limit: Optional[int], logger: logging.Logger, timeout: int = REQUEST_TIMEOUT):
     """
     Process CSV file and download container images.
     
     Args:
         csv_file: Path to CSV file with URLs and references
-        output_dir: Directory to save downloaded images
         limit: Maximum number of images to download (None for all)
         logger: Logger instance
     """
-    # Ensure output directory exists
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Ensure output directories exist
+    CROPPED_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    TBD_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     
     # Statistics tracking
     stats = {
         "total_rows": 0,
         "downloaded": 0,
+        "downloaded_cropped": 0,
+        "downloaded_tbd": 0,
         "skipped_existing": 0,
         "failed": 0,
         "invalid_reference": 0
@@ -184,7 +157,9 @@ def process_csv_file(csv_file: Path, output_dir: Path, limit: Optional[int], log
                 return
             
             logger.info(f"Starting download from {csv_file}")
-            logger.info(f"Output directory: {output_dir}")
+            logger.info(f"Output directories:")
+            logger.info(f"  - Cropped images: {CROPPED_OUTPUT_DIR}")
+            logger.info(f"  - Other images: {TBD_OUTPUT_DIR}")
             if limit:
                 logger.info(f"Download limit: {limit} images")
             
@@ -225,6 +200,10 @@ def process_csv_file(csv_file: Path, output_dir: Path, limit: Optional[int], log
                     stats["skipped_existing"] += 1
                     continue
                 
+                # Determine output directory based on URL content
+                is_cropped = "cropped" in url.lower()
+                output_dir = CROPPED_OUTPUT_DIR if is_cropped else TBD_OUTPUT_DIR
+                
                 # Determine output filename
                 output_filename = f"{reference}.jpg"
                 output_path = output_dir / output_filename
@@ -237,12 +216,17 @@ def process_csv_file(csv_file: Path, output_dir: Path, limit: Optional[int], log
                     continue
                 
                 # Download image
-                logger.info(f"Row {row_num}: Downloading {reference} from {url}")
+                image_type = "cropped" if is_cropped else "tbd"
+                logger.info(f"Row {row_num}: Downloading {reference} ({image_type}) from {url}")
                 
                 if download_image(url, output_path, logger, timeout):
                     stats["downloaded"] += 1
+                    if is_cropped:
+                        stats["downloaded_cropped"] += 1
+                    else:
+                        stats["downloaded_tbd"] += 1
                     processed_refs.add(reference)
-                    logger.info(f"Row {row_num}: ✓ Saved {output_filename}")
+                    logger.info(f"Row {row_num}: ✓ Saved {output_filename} to {output_dir.name}")
                 else:
                     stats["failed"] += 1
                     logger.error(f"Row {row_num}: ✗ Failed to download {reference}")
@@ -252,7 +236,7 @@ def process_csv_file(csv_file: Path, output_dir: Path, limit: Optional[int], log
                 
                 # Progress update every 50 downloads
                 if stats["downloaded"] % 50 == 0:
-                    logger.info(f"Progress: {stats['downloaded']} downloaded, {stats['failed']} failed")
+                    logger.info(f"Progress: {stats['downloaded']} downloaded ({stats['downloaded_cropped']} cropped, {stats['downloaded_tbd']} tbd), {stats['failed']} failed")
     
     except FileNotFoundError:
         logger.error(f"CSV file not found: {csv_file}")
@@ -268,10 +252,11 @@ def process_csv_file(csv_file: Path, output_dir: Path, limit: Optional[int], log
     logger.info("="*50)
     logger.info(f"Total rows processed: {stats['total_rows']}")
     logger.info(f"Successfully downloaded: {stats['downloaded']}")
+    logger.info(f"  - Cropped images: {stats['downloaded_cropped']} → {CROPPED_OUTPUT_DIR.name}")
+    logger.info(f"  - TBD images: {stats['downloaded_tbd']} → {TBD_OUTPUT_DIR.name}")
     logger.info(f"Skipped (already exists): {stats['skipped_existing']}")
     logger.info(f"Failed downloads: {stats['failed']}")
     logger.info(f"Invalid references: {stats['invalid_reference']}")
-    logger.info(f"Output directory: {output_dir}")
     
     if stats["downloaded"] > 0:
         logger.info(f"\n✓ Successfully downloaded {stats['downloaded']} container images!")
@@ -282,7 +267,7 @@ def process_csv_file(csv_file: Path, output_dir: Path, limit: Optional[int], log
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
-        description="Download container images from CSV file",
+        description="Download extra container images from CSV file and organize by type",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
     
@@ -291,13 +276,6 @@ def main():
         type=Path,
         default=DEFAULT_CSV_FILE,
         help="Path to CSV file with container URLs and references"
-    )
-    
-    parser.add_argument(
-        "--output-dir",
-        type=Path,
-        default=DEFAULT_OUTPUT_DIR,
-        help="Directory to save downloaded images"
     )
     
     parser.add_argument(
@@ -315,10 +293,8 @@ def main():
     
     args = parser.parse_args()
     
-    # Set up logging with dynamic filename based on output directory
-    output_name = args.output_dir.name
-    log_filename = f"download_{output_name}.log"
-    logger = setup_logging(log_filename)
+    # Set up logging
+    logger = setup_logging()
     
     # Validate input file
     if not args.csv_file.exists():
@@ -327,11 +303,11 @@ def main():
         return 1
     
     # Start processing
-    logger.info("Container Image Downloader Starting...")
+    logger.info("Extra Container Image Downloader Starting...")
     start_time = time.time()
     
     try:
-        process_csv_file(args.csv_file, args.output_dir, args.limit, logger, args.timeout)
+        process_csv_file(args.csv_file, args.limit, logger, args.timeout)
     
     except KeyboardInterrupt:
         logger.info("\nDownload interrupted by user")
@@ -348,4 +324,4 @@ def main():
     return 0
 
 if __name__ == "__main__":
-    exit(main()) 
+    exit(main())
