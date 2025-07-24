@@ -89,7 +89,8 @@ data/OCR/training_data/*
 
 data/OCR/cutouts/*
 data/OCR/labels/*
-data/OCR/models
+data/detection/labels/ignore/*
+data/OCR/models/ignore/*
 data/OCR/*.csv
 models/*
 data/OCR/horizontal/images/*.jpg
