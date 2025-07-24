@@ -10,6 +10,10 @@
 namespace universalscanner {
 
 YoloOCREngine::YoloOCREngine(const std::string& modelPath) {
+    // Extract filename from path
+    size_t lastSlash = modelPath.find_last_of("/\\");
+    modelFilename_ = (lastSlash != std::string::npos) ? modelPath.substr(lastSlash + 1) : modelPath;
+    
     initializeOnnx();
     loadModel(modelPath);
     
@@ -50,7 +54,7 @@ YoloOCREngine::OCRResult YoloOCREngine::recognize(
     
     // 1. Convert image to tensor
     LOGD("🔤 Converting image to tensor...");
-    auto tensor = preprocessToTensor(letterboxedCrop, 640);
+    auto tensor = preprocessToTensor(letterboxedCrop, 320);
     LOGD("🔤 Tensor created: %zu elements", tensor.size());
     
     auto inferStart = std::chrono::high_resolution_clock::now();
@@ -64,11 +68,11 @@ YoloOCREngine::OCRResult YoloOCREngine::recognize(
     
     // 3. Parse YOLO output
     LOGD("🔤 Parsing YOLO output...");
-    auto boxes = parseYoloOutput(output, 640);
+    auto boxes = parseYoloOutput(output, 320);
     LOGD("🔤 Found %zu character boxes", boxes.size());
     
     // 4. Apply NMS
-    boxes = runNMS(boxes, 0.6f);
+    boxes = runNMS(boxes, 0.3f);  // Lower IoU threshold for text (characters can be close)
     
     // 5. Assemble text
     auto text = assembleText(boxes, classType);
@@ -97,8 +101,8 @@ std::vector<float> YoloOCREngine::preprocessToTensor(const ImageData& image, int
 }
 
 Ort::Value YoloOCREngine::runInference(Ort::Session* session, const std::vector<float>& inputTensor) {
-    // Input shape for 640x640 model
-    std::array<int64_t, 4> inputShape = {1, 3, 640, 640};
+    // Input shape for 320x320 model
+    std::array<int64_t, 4> inputShape = {1, 3, 320, 320};
     
     // Create input tensor
     auto inputTensorValue = Ort::Value::CreateTensor<float>(
@@ -127,17 +131,49 @@ std::vector<YoloOCREngine::CharBox> YoloOCREngine::parseYoloOutput(
     const Ort::Value& output,
     int modelSize
 ) {
-    // Output shape: [1, 40, 8400] - batch, attributes, anchors
-    const int numAnchors = 8400;
+    // Expected values
     const int numAttributes = 40;  // 4 bbox + 36 classes
     const int numClasses = 36;     // 0-9, A-Z
     
     // Get tensor info
-    auto shape = output.GetTensorTypeAndShapeInfo().GetShape();
+    auto tensorInfo = output.GetTensorTypeAndShapeInfo();
+    auto shape = tensorInfo.GetShape();
     const float* data = output.GetTensorData<float>();
     
-    // Handle both [40, 8400] and [8400, 40] layouts
-    bool attributesFirst = (shape[1] == numAttributes);
+    // Validate shape
+    if (shape.size() != 3) {
+        LOGE("Invalid output tensor dimensions: %zu (expected 3)", shape.size());
+        return {};
+    }
+    
+    LOGD("YOLO output shape: [%lld, %lld, %lld]", shape[0], shape[1], shape[2]);
+    
+    // Dynamically determine anchors and layout
+    int numAnchors;
+    bool attributesFirst;
+    
+    if (shape[1] == numAttributes) {
+        // [1, 40, N] layout
+        attributesFirst = true;
+        numAnchors = shape[2];
+    } else if (shape[2] == numAttributes) {
+        // [1, N, 40] layout
+        attributesFirst = false;
+        numAnchors = shape[1];
+    } else {
+        LOGE("Invalid output shape: neither dimension matches expected attributes %d", numAttributes);
+        return {};
+    }
+    
+    LOGD("Detected %d anchors, attributes first: %s", numAnchors, attributesFirst ? "true" : "false");
+    
+    // Validate data size
+    size_t expectedSize = shape[0] * shape[1] * shape[2];
+    size_t actualSize = tensorInfo.GetElementCount();
+    if (actualSize != expectedSize) {
+        LOGE("Tensor size mismatch: expected %zu, got %zu", expectedSize, actualSize);
+        return {};
+    }
     
     std::vector<CharBox> boxes;
     
@@ -157,8 +193,7 @@ std::vector<YoloOCREngine::CharBox> YoloOCREngine::parseYoloOutput(
             }
         }
         
-        if (maxProb > 0.6f) {  // Confidence threshold
-            LOGD("NMS-filter %zu prob YOLO output", maxProb);
+        if (maxProb > 0.4f) {  // Confidence threshold (lowered for better detection)
             CharBox box;
             
             // Extract bbox coordinates
@@ -177,6 +212,9 @@ std::vector<YoloOCREngine::CharBox> YoloOCREngine::parseYoloOutput(
             box.confidence = maxProb;
             box.character = classNames_[maxClass];
             boxes.push_back(box);
+            
+            LOGD("Character detected: '%c' conf=%.3f at (%.1f,%.1f) size=%.1fx%.1f", 
+                 box.character, box.confidence, box.x, box.y, box.w, box.h);
         }
     }
     
@@ -208,6 +246,28 @@ std::vector<YoloOCREngine::CharBox> YoloOCREngine::runNMS(
     }
     
     LOGD("NMS: %zu boxes -> %zu boxes", boxes.size(), result.size());
+    
+    // Log surviving characters for debugging
+    if (result.size() > 0) {
+        std::string chars;
+        std::vector<float> xCoords;
+        for (const auto& box : result) {
+            chars += box.character;
+            chars += " ";
+            xCoords.push_back(box.x);
+        }
+        LOGD("Surviving characters after NMS: %s", chars.c_str());
+        
+        // Log X coordinates for debugging
+        std::string xStr;
+        for (float x : xCoords) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%.1f ", x);
+            xStr += buf;
+        }
+        LOGD("Character X-coordinates: %s", xStr.c_str());
+    }
+    
     return result;
 }
 
@@ -243,15 +303,23 @@ std::string YoloOCREngine::assembleHorizontalContainerText(std::vector<CharBox>&
     if (boxes.empty()) return "";
     
     // Group characters by lines (Y coordinate)
-    // Use a tolerance for grouping characters on the same line
-    float lineToleranceRatio = 0.3f; // 30% of average character height
-    
-    // Calculate average character height for line grouping
+    // First, check if all characters are likely on a single line
+    float minY = boxes[0].y, maxY = boxes[0].y;
     float avgHeight = 0.0f;
     for (const auto& box : boxes) {
+        minY = std::min(minY, box.y);
+        maxY = std::max(maxY, box.y);
         avgHeight += box.h;
     }
     avgHeight /= boxes.size();
+    
+    float yRange = maxY - minY;
+    LOGD("Y-coordinate range: %.1f (min=%.1f, max=%.1f), avg char height=%.1f", 
+         yRange, minY, maxY, avgHeight);
+    
+    // If Y-range is less than average character height, treat as single line
+    // Otherwise use a more generous tolerance for line grouping
+    float lineToleranceRatio = (yRange < avgHeight) ? 1.5f : 0.8f; // More generous tolerance
     float lineTolerance = avgHeight * lineToleranceRatio;
     
     // Group characters into lines
@@ -278,6 +346,28 @@ std::string YoloOCREngine::assembleHorizontalContainerText(std::vector<CharBox>&
     }
     
     LOGD("Grouped %zu characters into %zu lines for horizontal container", boxes.size(), lines.size());
+    
+    // Debug: Log each line's content
+    for (size_t i = 0; i < lines.size(); i++) {
+        std::string lineChars;
+        for (const auto& box : lines[i]) {
+            lineChars += box.character;
+        }
+        LOGD("Line %zu: '%s' (%zu chars at y≈%.1f)", i, lineChars.c_str(), 
+             lines[i].size(), lines[i][0].y);
+    }
+    
+    // Check if we should merge all lines into one
+    // This happens when the Y-range is small relative to character height
+    if (lines.size() > 1 && yRange < avgHeight * 1.5f) {
+        LOGD("Y-range (%.1f) suggests single line, merging %zu lines", yRange, lines.size());
+        std::vector<CharBox> mergedLine;
+        for (const auto& line : lines) {
+            mergedLine.insert(mergedLine.end(), line.begin(), line.end());
+        }
+        lines.clear();
+        lines.push_back(mergedLine);
+    }
     
     // Sort lines by Y coordinate (top to bottom)
     std::sort(lines.begin(), lines.end(),

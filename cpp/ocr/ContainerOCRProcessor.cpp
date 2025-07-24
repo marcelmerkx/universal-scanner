@@ -75,7 +75,7 @@ ScanResult ContainerOCRProcessor::processContainerCode(
     
     // 5. Create scan result
     return createScanResult(
-        detection, ocrResult, cropResult, letterboxResult, isValid
+        detection, ocrResult, cropResult, letterboxResult, isValid, ocrEngine
     );
 }
 
@@ -183,7 +183,8 @@ ScanResult ContainerOCRProcessor::createScanResult(
     const YoloOCREngine::OCRResult& ocrResult,
     const CropExtractor::CropResult& cropResult,
     const AdaptiveLetterbox::LetterboxResult& letterboxResult,
-    bool isValid
+    bool isValid,
+    YoloOCREngine& ocrEngine
 ) {
     ScanResult result;
     
@@ -191,7 +192,7 @@ ScanResult ContainerOCRProcessor::createScanResult(
     result.type = detection.classType;
     result.value = ocrResult.text;
     result.confidence = ocrResult.confidence;
-    result.model = "yolo-ocr-v7-320";
+    result.model = ocrEngine.getModelFilename();
     
     // Bounding box in original frame coordinates
     result.bbox = {

@@ -48,7 +48,7 @@ private:
     Ort::MemoryInfo memoryInfo;
     bool modelLoaded;
     
-    // Model info for unified-detection-v7.onnx
+    // Model info for unified-detection-v7-320.onnx
     struct {
         std::vector<int64_t> inputShape = {1, 3, 640, 640}; // NCHW format
         std::vector<int64_t> outputShape = {1, 9, 8400}; // 9 features x 8400 anchors (4 bbox + 5 classes, NO objectness)
@@ -92,12 +92,12 @@ public:
         if (modelLoaded) return true;
         
         try {
-            // Try to load model from internal storage
-            std::string modelPath = "/data/data/com.cargosnap.universalscanner/files/detection_v10_320_grayscale_tilted-09-07-2025.onnx";
+            // Try to load model from internal storage (where it's extracted)
+            std::string modelPath = "/data/data/com.cargosnap.universalscanner/files/unified-detection-v7-320.onnx";
             auto modelData = loadModelFromFile(modelPath);
             if (modelData.empty()) {
-                // Try assets location
-                modelPath = "/android_asset/detection_v10_320_grayscale_tilted-09-07-2025.onnx";
+                // Try alternative app package name
+                modelPath = "/data/data/com.universal.scanner/files/unified-detection-v7-320.onnx";
                 modelData = loadModelFromFile(modelPath);
                 if (modelData.empty()) {
                     LOGF("Failed to load model from any location");
@@ -518,7 +518,7 @@ public:
                     float w = getVal(a, 2);
                     float h = getVal(a, 3);
                     
-                    LOGF("DETECTION[%zu]: {\"type\":\"%s\", \"confidence\":%.3f, \"x\":%d, \"y\":%d, \"width\":%d, \"height\":%d, \"model\":\"unified-detection-v7.onnx\"}", 
+                    LOGF("DETECTION[%zu]: {\"type\":\"%s\", \"confidence\":%.3f, \"x\":%d, \"y\":%d, \"width\":%d, \"height\":%d, \"model\":\"unified-detection-v7-320.onnx\"}", 
                          a, getClassName(classIdx), confidence, (int)(x * width / 640.0f), (int)(y * height / 640.0f), 
                          (int)(w * width / 640.0f), (int)(h * height / 640.0f));
                 }
@@ -603,9 +603,9 @@ public:
     }
     
     // Native method that processes real frame data from VisionCamera
-    local_ref<jstring> nativeProcessFrameWithData(int width, int height, alias_ref<jbyteArray> frameData, int enabledTypesMask, bool useTflite) {
-        LOGF("nativeProcessFrameWithData called with %dx%d, frame data size: %zu, enabled types mask: 0x%02X, useTflite: %s", 
-             width, height, frameData->size(), enabledTypesMask, useTflite ? "true" : "false");
+    local_ref<jstring> nativeProcessFrameWithData(int width, int height, alias_ref<jbyteArray> frameData, int enabledTypesMask) {
+        LOGF("nativeProcessFrameWithData called with %dx%d, frame data size: %zu, enabled types mask: 0x%02X", 
+             width, height, frameData->size(), enabledTypesMask);
         
         
         try {

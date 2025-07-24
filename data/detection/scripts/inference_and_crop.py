@@ -4,14 +4,44 @@ Run inference on container door images and crop detected regions.
 
 This script:
 1. Loads a PyTorch YOLO detection model
-2. Runs inference on images from data/detection/containerdoors
-3. Crops detected regions and saves them to data/detection/training_data/00_raw/{class_name}
+2. Runs inference on images from specified input directory
+3. Crops detected regions and saves them to output directory organized by class
 4. Preserves original filenames for cropped images
+5. Copies images with no detections to a separate folder for analysis
 
 Usage:
+    # Basic test with 10 images
     python3 data/detection/scripts/inference_and_crop.py --limit 10
-    python3 data/detection/scripts/inference_and_crop.py --confidence 0.5
-    python3 data/detection/scripts/inference_and_crop.py --model-path path/to/model.pt
+    
+    # Custom input/output directories
+    python3 data/detection/scripts/inference_and_crop.py \
+        --input-dir /path/to/your/images \
+        --output-dir /path/to/output \
+        --limit 10
+    
+    # Full run with all parameters
+    python3 data/detection/scripts/inference_and_crop.py \
+        --input-dir data/OCR/horizontal \
+        --output-dir data/OCR/horizontal_crops \
+        --model-path data/detection/models/your-model.pt \
+        --confidence 0.3 \
+        --padding 15
+
+Parameters:
+    --input-dir: Directory containing input images (default: data/detection/containerdoors/images)
+    --output-dir: Base directory for output crops (default: data/detection/training_data/00_raw)
+    --model-path: Path to YOLO .pt model file (default: data/detection/models/detection_320_grayscale_tilted-09-07-2025.pt)
+    --limit: Maximum number of images to process, useful for testing (default: None, process all)
+    --confidence: Confidence threshold for detections (default: 0.3)
+    --padding: Pixels to add around detections when cropping (default: 10)
+
+Output structure:
+    output-dir/
+    ├── {class_name}/       # Cropped detections organized by class
+    │   ├── image1.jpg
+    │   └── image2_1.jpg    # Multiple detections get indexed
+    └── no_detection/       # Images where no detections were found
+        └── image3.jpg
 """
 
 import argparse

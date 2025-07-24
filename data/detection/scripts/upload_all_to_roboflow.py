@@ -8,8 +8,21 @@ This script uploads all images from the 01_labelled/images folder to Roboflow:
 
 Usage:
     python3 data/detection/scripts/upload_all_to_roboflow.py
-    python3 data/detection/scripts/upload_all_to_roboflow.py --split valid
-    python3 data/detection/scripts/upload_all_to_roboflow.py --batch-size 10
+    python3 data/detection/scripts/upload_all_to_roboflow.py --split auto
+    python3 data/detection/scripts/upload_all_to_roboflow.py --limit 100
+    python3 data/detection/scripts/upload_all_to_roboflow.py --batch-name "horizontal_containers_v2"
+
+Parameters:
+    --api-key: Roboflow API key (or set ROBOFLOW_API_KEY env var)
+    --workspace: Roboflow workspace name (default: cargosnap)
+    --project: Roboflow project ID (default: unified-detection-0zmvz)
+    --labelled-dir: Directory with images/labels subdirectories (default: data/detection/training_data/01_labelled)
+    --batch-size: Number of images per upload batch (default: 10)
+    --split: Dataset split - train/valid/test/auto (default: auto)
+             auto = randomly assign 70% train, 20% valid, 10% test
+    --limit: Maximum number of images to upload (default: None - upload all)
+    --batch-name: Name for this upload batch in Roboflow (default: None)
+    --dry-run: Process files but don't upload
 """
 
 import argparse
@@ -17,6 +30,7 @@ import logging
 import os
 import sys
 import time
+import random
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from dotenv import load_dotenv
@@ -53,7 +67,7 @@ def setup_logging():
     return logging.getLogger(__name__)
 
 
-def categorize_images(images_dir: Path, labels_dir: Path, logger: logging.Logger) -> Tuple[List[Tuple[Path, Path]], List[Path]]:
+def categorize_images(images_dir: Path, labels_dir: Path, limit: Optional[int], logger: logging.Logger) -> Tuple[List[Tuple[Path, Path]], List[Path]]:
     """
     Categorize images into labelled and unlabelled.
     
@@ -92,13 +106,32 @@ def categorize_images(images_dir: Path, labels_dir: Path, logger: logging.Logger
     logger.info(f"Found {len(label_files)} label files")
     logger.info(f"Categorized: {len(labelled_pairs)} labelled, {len(unlabelled_images)} unlabelled")
     
+    # Apply limit if specified
+    if limit:
+        total_before = len(labelled_pairs) + len(unlabelled_images)
+        
+        # Shuffle to get random selection
+        random.shuffle(labelled_pairs)
+        random.shuffle(unlabelled_images)
+        
+        # Distribute limit proportionally
+        if total_before > 0:
+            labelled_ratio = len(labelled_pairs) / total_before
+            labelled_limit = int(limit * labelled_ratio)
+            unlabelled_limit = limit - labelled_limit
+            
+            labelled_pairs = labelled_pairs[:labelled_limit]
+            unlabelled_images = unlabelled_images[:unlabelled_limit]
+            
+            logger.info(f"Applied limit of {limit}: {len(labelled_pairs)} labelled, {len(unlabelled_images)} unlabelled")
+    
     return labelled_pairs, unlabelled_images
 
 
 def upload_all_images(api_key: str, workspace: str, project_id: str,
                      labelled_pairs: List[Tuple[Path, Path]], 
                      unlabelled_images: List[Path],
-                     batch_size: int, split: str, logger: logging.Logger) -> Dict:
+                     batch_size: int, split: str, batch_name: Optional[str], logger: logging.Logger) -> Dict:
     """
     Upload both labelled and unlabelled images to Roboflow.
     
@@ -161,14 +194,33 @@ def upload_all_images(api_key: str, workspace: str, project_id: str,
                 logger.info(f"Uploading labelled {idx}/{len(labelled_pairs)}: {image_path.name} + {label_path.name}")
                 
                 try:
+                    # Determine split for this image if auto
+                    if split == "auto":
+                        rand_val = random.random()
+                        if rand_val < 0.7:
+                            image_split = "train"
+                        elif rand_val < 0.9:
+                            image_split = "valid"
+                        else:
+                            image_split = "test"
+                    else:
+                        image_split = split
+                    
+                    # Build upload kwargs
+                    upload_kwargs = {
+                        "image_path": str(image_path),
+                        "annotation_path": str(label_path),
+                        "annotation_labelmap": labelmap,
+                        "split": image_split,
+                        "num_retry_uploads": 1
+                    }
+                    
+                    # Add batch name if provided
+                    if batch_name:
+                        upload_kwargs["batch_name"] = batch_name
+                    
                     # Upload image with corresponding YOLO label and labelmap
-                    result = project.single_upload(
-                        image_path=str(image_path),
-                        annotation_path=str(label_path),
-                        annotation_labelmap=labelmap,
-                        split=split,
-                        num_retry_uploads=1
-                    )
+                    result = project.single_upload(**upload_kwargs)
                     
                     stats["labelled_uploaded"] += 1
                     logger.debug(f"Successfully uploaded labelled: {image_path.name}")
@@ -213,12 +265,31 @@ def upload_all_images(api_key: str, workspace: str, project_id: str,
                 logger.info(f"Uploading unlabelled {idx}/{len(unlabelled_images)}: {image_path.name}")
                 
                 try:
+                    # Determine split for this image if auto
+                    if split == "auto":
+                        rand_val = random.random()
+                        if rand_val < 0.7:
+                            image_split = "train"
+                        elif rand_val < 0.9:
+                            image_split = "valid"
+                        else:
+                            image_split = "test"
+                    else:
+                        image_split = split
+                    
+                    # Build upload kwargs
+                    upload_kwargs = {
+                        "image_path": str(image_path),
+                        "split": image_split,
+                        "num_retry_uploads": 1
+                    }
+                    
+                    # Add batch name if provided
+                    if batch_name:
+                        upload_kwargs["batch_name"] = batch_name
+                    
                     # Upload image without annotations
-                    result = project.single_upload(
-                        image_path=str(image_path),
-                        split=split,
-                        num_retry_uploads=1
-                    )
+                    result = project.single_upload(**upload_kwargs)
                     
                     stats["unlabelled_uploaded"] += 1
                     logger.debug(f"Successfully uploaded unlabelled: {image_path.name}")
@@ -330,9 +401,21 @@ def main():
     
     parser.add_argument(
         "--split",
-        choices=["train", "valid", "test"],
-        default="train",
-        help="Dataset split for uploaded images"
+        choices=["train", "valid", "test", "auto"],
+        default="auto",
+        help="Dataset split for uploaded images (auto = 70%% train, 20%% valid, 10%% test)"
+    )
+    
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="Maximum number of images to upload (default: None - upload all)"
+    )
+    
+    parser.add_argument(
+        "--batch-name",
+        type=str,
+        help="Name for this upload batch in Roboflow"
     )
     
     parser.add_argument(
@@ -356,7 +439,11 @@ def main():
     logger.info(f"Workspace: {args.workspace}")
     logger.info(f"Project: {args.project}")
     logger.info(f"Dataset split: {args.split}")
+    if args.split == "auto":
+        logger.info(f"  Auto split: 70% train, 20% valid, 10% test")
     logger.info(f"Batch size: {args.batch_size}")
+    logger.info(f"Limit: {args.limit if args.limit else 'None (upload all)'}")
+    logger.info(f"Batch name: {args.batch_name if args.batch_name else 'None'}")
     logger.info(f"Dry run: {args.dry_run}")
     
     # Check if API key is provided
@@ -376,7 +463,7 @@ def main():
     
     try:
         # Categorize images
-        labelled_pairs, unlabelled_images = categorize_images(images_dir, labels_dir, logger)
+        labelled_pairs, unlabelled_images = categorize_images(images_dir, labels_dir, args.limit, logger)
         
         if not labelled_pairs and not unlabelled_images:
             logger.error("No images found to upload.")
@@ -385,7 +472,12 @@ def main():
         if args.dry_run:
             logger.info(f"\n✅ Dry run completed!")
             logger.info(f"Would upload {len(labelled_pairs)} labelled pairs and {len(unlabelled_images)} unlabelled images")
-            logger.info(f"All uploads would go to '{args.split}' split")
+            if args.split == "auto":
+                logger.info(f"Images would be randomly split: 70% train, 20% valid, 10% test")
+            else:
+                logger.info(f"All uploads would go to '{args.split}' split")
+            if args.batch_name:
+                logger.info(f"Batch name: {args.batch_name}")
             
             # Show examples
             if labelled_pairs:
@@ -409,7 +501,7 @@ def main():
         
         stats = upload_all_images(
             args.api_key, args.workspace, args.project,
-            labelled_pairs, unlabelled_images, args.batch_size, args.split, logger
+            labelled_pairs, unlabelled_images, args.batch_size, args.split, args.batch_name, logger
         )
         
         # Print statistics

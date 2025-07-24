@@ -20,11 +20,8 @@ public:
 
 private:
     DebugConfig() {
-        #ifdef DEBUG
-            m_enableDebugImages = true;
-        #else
-            m_enableDebugImages = false;
-        #endif
+        // Default to false - debug images must be explicitly enabled
+        m_enableDebugImages = false;
     }
 
     bool m_enableDebugImages;

@@ -123,50 +123,19 @@ bool OnnxProcessor::initializeModel() {
         // Create ONNX Runtime environment
         ortEnv = std::make_unique<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "UniversalScanner");
         
-        // Try to create session with hardware acceleration first, fallback to CPU if it fails
-        bool sessionCreated = false;
-        
-        // First attempt: Try with hardware acceleration (NNAPI/CoreML)
+        // Create session with CPU execution
         try {
             Ort::SessionOptions sessionOptions;
-            
-            // Use OnnxDelegateManager to select best execution provider - CPU only for investigation
-            // Parameters: (sessionOptions, verbose, preferXNNPACK, disableNNAPI)
-            currentExecutionProvider = OnnxDelegateManager::configure(sessionOptions, true, true, true);
+            sessionOptions.SetIntraOpNumThreads(1);
             
             // Create session from memory buffer
             session = std::make_unique<Ort::Session>(*ortEnv, modelData.data(), modelData.size(), sessionOptions);
-            sessionCreated = true;
+            currentExecutionProvider = ExecutionProvider::CPU;
             
-            LOGF("✅ ONNX model loaded successfully with %s execution provider!", 
-                 OnnxDelegateManager::getPerformanceDescription(currentExecutionProvider));
-            LOGF("📊 Expected performance: %.1fx vs CPU baseline", 
-                 OnnxDelegateManager::getPerformanceMultiplier(currentExecutionProvider));
-                 
+            LOGF("✅ ONNX model loaded successfully with CPU execution");
+            
         } catch (const Ort::Exception& e) {
-            LOGF("⚠️ Hardware acceleration failed (%s), falling back to CPU", e.what());
-            
-            // Second attempt: Fallback to CPU-only execution
-            try {
-                Ort::SessionOptions cpuSessionOptions;
-                cpuSessionOptions.SetIntraOpNumThreads(1);
-                // No execution provider configured = CPU default
-                
-                session = std::make_unique<Ort::Session>(*ortEnv, modelData.data(), modelData.size(), cpuSessionOptions);
-                currentExecutionProvider = ExecutionProvider::CPU;
-                sessionCreated = true;
-                
-                LOGF("✅ ONNX model loaded successfully with CPU fallback");
-                LOGF("💡 Consider using a model optimized for mobile hardware acceleration");
-                
-            } catch (const Ort::Exception& cpuError) {
-                LOGF("❌ CPU fallback also failed: %s", cpuError.what());
-                return false;
-            }
-        }
-        
-        if (!sessionCreated) {
-            LOGF("❌ Failed to create ONNX session with any execution provider");
+            LOGE("❌ Failed to initialize ONNX session: %s", e.what());
             return false;
         }
         

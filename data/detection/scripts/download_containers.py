@@ -5,12 +5,13 @@ Download Images from CSV for Training Data
 This script downloads images from URLs listed in a CSV file and saves them
 with normalized filenames in the training data structure.
 
-Input: CSV file with columns "url" and "reference"
+Input: CSV file with columns "url", "reference", and optional "id"
 
 The input file is generated using this SQL query:
         SELECT top 5000
             ('https://media.cargosnap.net/thumbnails/sm/tenant' + CONVERT(varchar(4), x.tenant_id) + '/' + x.image_path) as url,
-            scan_code as reference
+            scan_code as reference,
+            x.id as id  -- Optional: include for unique filenames
         FROM
             cargosnapdb.dbo.files_cutouts x
         WHERE
@@ -37,9 +38,9 @@ Usage Examples:
         --limit 100
 
 The script:
-1. Reads CSV file with image URLs and references
+1. Reads CSV file with image URLs, references, and optional IDs
 2. Processes references by removing quotes and applying corrections
-3. Downloads images and saves them as {reference}.jpg
+3. Downloads images and saves them as {reference}.jpg or {reference}-{id}.jpg (if ID provided)
 4. Skips duplicates and reports download status
 5. Creates progress tracking and error logs
 
@@ -183,8 +184,12 @@ def process_csv_file(csv_file: Path, output_dir: Path, limit: Optional[int], log
                 logger.error(f"CSV file must have 'url' and 'reference' columns. Found: {csv_reader.fieldnames}")
                 return
             
+            # Check if ID column exists
+            has_id_column = "id" in csv_reader.fieldnames
+            
             logger.info(f"Starting download from {csv_file}")
             logger.info(f"Output directory: {output_dir}")
+            logger.info(f"ID column present: {has_id_column}")
             if limit:
                 logger.info(f"Download limit: {limit} images")
             
@@ -199,6 +204,7 @@ def process_csv_file(csv_file: Path, output_dir: Path, limit: Optional[int], log
                 # Extract and validate data
                 url = row.get("url", "").strip()
                 raw_reference = row.get("reference", "").strip()
+                row_id = row.get("id", "").strip() if has_id_column else ""
                 
                 if not url or not raw_reference:
                     logger.warning(f"Row {row_num}: Missing URL or reference, skipping")
@@ -219,33 +225,39 @@ def process_csv_file(csv_file: Path, output_dir: Path, limit: Optional[int], log
                     stats["invalid_reference"] += 1
                     continue
                 
+                # Create unique key for duplicate tracking
+                unique_key = f"{reference}-{row_id}" if row_id else reference
+                
                 # Check for duplicates
-                if reference in processed_refs:
-                    logger.debug(f"Row {row_num}: Duplicate reference '{reference}', skipping")
+                if unique_key in processed_refs:
+                    logger.debug(f"Row {row_num}: Duplicate entry '{unique_key}', skipping")
                     stats["skipped_existing"] += 1
                     continue
                 
                 # Determine output filename
-                output_filename = f"{reference}.jpg"
+                if row_id:
+                    output_filename = f"{reference}-{row_id}.jpg"
+                else:
+                    output_filename = f"{reference}.jpg"
                 output_path = output_dir / output_filename
                 
                 # Skip if file already exists
                 if output_path.exists():
                     logger.debug(f"Row {row_num}: File already exists '{output_filename}', skipping")
                     stats["skipped_existing"] += 1
-                    processed_refs.add(reference)
+                    processed_refs.add(unique_key)
                     continue
                 
                 # Download image
-                logger.info(f"Row {row_num}: Downloading {reference} from {url}")
+                logger.info(f"Row {row_num}: Downloading {output_filename} from {url}")
                 
                 if download_image(url, output_path, logger, timeout):
                     stats["downloaded"] += 1
-                    processed_refs.add(reference)
+                    processed_refs.add(unique_key)
                     logger.info(f"Row {row_num}: ✓ Saved {output_filename}")
                 else:
                     stats["failed"] += 1
-                    logger.error(f"Row {row_num}: ✗ Failed to download {reference}")
+                    logger.error(f"Row {row_num}: ✗ Failed to download {output_filename}")
                 
                 # Brief delay to be respectful to servers
                 time.sleep(DELAY_BETWEEN_REQUESTS)

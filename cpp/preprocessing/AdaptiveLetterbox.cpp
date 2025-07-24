@@ -31,18 +31,21 @@ AdaptiveLetterbox::LetterboxResult AdaptiveLetterbox::letterboxToSize(
     // Resize maintaining aspect ratio
     ImageData resized = input.resize(newWidth, newHeight);
     
-    // Create letterboxed image (top-left aligned like ContainerCameraApp)
+    // Create letterboxed image (centered padding to match Roboflow)
     result.image = ImageData(targetWidth, targetHeight, input.channels);
-    result.padLeft = 0;  // Top-left alignment
-    result.padTop = 0;
     
-    // Fill with black (already done by default constructor)
+    // Calculate centered padding
+    result.padLeft = (targetWidth - newWidth) / 2;
+    result.padTop = (targetHeight - newHeight) / 2;
     
-    // Copy resized image to top-left corner
+    // Fill with white for OCR (255) instead of black
+    std::fill(result.image.data.begin(), result.image.data.end(), 255);
+    
+    // Copy resized image to center
     for (int y = 0; y < newHeight; y++) {
         for (int x = 0; x < newWidth; x++) {
             const uint8_t* srcPixel = resized.getPixel(x, y);
-            uint8_t* dstPixel = result.image.getPixel(x, y);
+            uint8_t* dstPixel = result.image.getPixel(x + result.padLeft, y + result.padTop);
             
             for (int c = 0; c < input.channels; c++) {
                 dstPixel[c] = srcPixel[c];

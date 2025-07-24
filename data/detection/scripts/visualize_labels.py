@@ -8,9 +8,18 @@ This script:
 3. Allows navigation through the dataset with Back/Next
 4. Shows class names and confidence information
 
+Color Coding:
+- Each character class (0-9, A-Z) has a consistent color
+- Same characters will always have the same color across all images
+- This makes it easy to spot labeling errors or patterns
+
 Usage:
     python3 data/detection/scripts/visualize_labels.py
     python3 data/detection/scripts/visualize_labels.py --root data/detection/training_data/03_ocr_generated
+    
+Navigation:
+    - Click Next/Previous buttons or use arrow keys
+    - Press 'q' or ESC to quit
 """
 
 import argparse
@@ -206,8 +215,8 @@ class LabelVisualizer:
         for i, detection in enumerate(detections):
             x1, y1, x2, y2 = self._yolo_to_pixel(detection, img_width, img_height)
             
-            # Get color for this detection
-            color = np.array(COLORS[i % len(COLORS)]) / 255.0  # Normalize to [0,1]
+            # Get color based on class_id so same characters have same color
+            color = np.array(COLORS[detection['class_id'] % len(COLORS)]) / 255.0  # Normalize to [0,1]
             
             # Create rectangle
             rect = patches.Rectangle(

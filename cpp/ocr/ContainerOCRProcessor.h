@@ -51,7 +51,8 @@ private:
         const YoloOCREngine::OCRResult& ocrResult,
         const CropExtractor::CropResult& cropResult,
         const AdaptiveLetterbox::LetterboxResult& letterboxResult,
-        bool isValid
+        bool isValid,
+        YoloOCREngine& ocrEngine
     );
 };
 

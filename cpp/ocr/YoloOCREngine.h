@@ -37,6 +37,9 @@ public:
         const std::string& classType
     );
     
+    // Get model filename
+    const std::string& getModelFilename() const { return modelFilename_; }
+    
 protected:
     // ONNX model
     std::unique_ptr<Ort::Session> model_;
@@ -65,6 +68,9 @@ private:
     
     // Calculate IoU for NMS
     float calculateIoU(const CharBox& a, const CharBox& b);
+    
+    // Model info
+    std::string modelFilename_;
 };
 
 } // namespace universalscanner

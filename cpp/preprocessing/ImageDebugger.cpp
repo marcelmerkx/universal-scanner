@@ -50,20 +50,31 @@ bool ImageDebugger::saveYUV420(const std::string& filename,
         return false;
     }
     
-    // Add timestamp to filename
+    // Add timestamp and phase to filename
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(now);
     std::stringstream ss;
     ss << std::put_time(std::localtime(&time_t), "%H%M%S_");
     
-    std::string fullPath = DEBUG_DIR + "/" + ss.str() + filename;
+    // Determine phase based on filename
+    std::string phase = "";
+    if (filename.find("ocr") != std::string::npos || 
+        filename.find("OCR") != std::string::npos) {
+        phase = "ocr_";
+    } else {
+        phase = "detection_";
+    }
+    
+    std::string fullPath = DEBUG_DIR + "/" + ss.str() + phase + filename;
     
     int result = stbi_write_jpg(fullPath.c_str(), width, height, 3, rgbData.data(), 90);
     
     if (result) {
-        LOGF("Saved YUV debug image: %s (%zux%zu)", fullPath.c_str(), width, height);
+        LOGF("[%s] Saved YUV debug image: %s (%zux%zu)", 
+             phase.empty() ? "DETECTION" : "OCR", fullPath.c_str(), width, height);
     } else {
-        LOGF("Failed to save YUV debug image: %s", fullPath.c_str());
+        LOGF("[%s] Failed to save YUV debug image: %s", 
+             phase.empty() ? "DETECTION" : "OCR", fullPath.c_str());
     }
     
     return result != 0;
@@ -81,20 +92,31 @@ bool ImageDebugger::saveRGB(const std::string& filename,
         return false;
     }
     
-    // Add timestamp to filename
+    // Add timestamp and phase to filename
     auto now = std::chrono::system_clock::now();
     auto time_t = std::chrono::system_clock::to_time_t(now);
     std::stringstream ss;
     ss << std::put_time(std::localtime(&time_t), "%H%M%S_");
     
-    std::string fullPath = DEBUG_DIR + "/" + ss.str() + filename;
+    // Determine phase based on filename
+    std::string phase = "";
+    if (filename.find("ocr") != std::string::npos || 
+        filename.find("OCR") != std::string::npos) {
+        phase = "ocr_";
+    } else {
+        phase = "detection_";
+    }
+    
+    std::string fullPath = DEBUG_DIR + "/" + ss.str() + phase + filename;
     
     int result = stbi_write_jpg(fullPath.c_str(), width, height, 3, rgbData.data(), 90);
     
     if (result) {
-        LOGF("Saved RGB debug image: %s (%zux%zu)", fullPath.c_str(), width, height);
+        LOGF("[%s] Saved RGB debug image: %s (%zux%zu)", 
+             phase.empty() ? "DETECTION" : "OCR", fullPath.c_str(), width, height);
     } else {
-        LOGF("Failed to save RGB debug image: %s", fullPath.c_str());
+        LOGF("[%s] Failed to save RGB debug image: %s", 
+             phase.empty() ? "DETECTION" : "OCR", fullPath.c_str());
     }
     
     return result != 0;
@@ -110,7 +132,10 @@ bool ImageDebugger::saveTensor(const std::string& filename,
 #ifdef DEBUG_IMAGES
     auto rgbData = tensorToRGB(tensorData, width, height);
     if (rgbData.empty()) {
-        LOGF("Failed to convert tensor to RGB for %s", filename.c_str());
+        // Determine phase for log message
+        std::string phase = (filename.find("ocr") != std::string::npos || 
+                           filename.find("OCR") != std::string::npos) ? "OCR" : "DETECTION";
+        LOGF("[%s] Failed to convert tensor to RGB for %s", phase.c_str(), filename.c_str());
         return false;
     }
     
@@ -128,7 +153,10 @@ bool ImageDebugger::saveAnnotated(const std::string& filename,
 #ifdef DEBUG_IMAGES
     auto rgbData = tensorToRGB(tensorData, width, height);
     if (rgbData.empty()) {
-        LOGF("Failed to convert tensor to RGB for annotation");
+        // Determine phase for log message
+        std::string phase = (filename.find("ocr") != std::string::npos || 
+                           filename.find("OCR") != std::string::npos) ? "OCR" : "DETECTION";
+        LOGF("[%s] Failed to convert tensor to RGB for annotation", phase.c_str());
         return false;
     }
     
@@ -145,8 +173,11 @@ bool ImageDebugger::saveAnnotated(const std::string& filename,
             // Only draw if confidence is above threshold
             if (confidence > 0.25f) {
                 drawBoundingBox(rgbData, width, height, centerX, centerY, boxWidth, boxHeight);
-                LOGF("Drew bounding box: center=(%.1f,%.1f), size=%.1fx%.1f, conf=%.2f", 
-                     centerX, centerY, boxWidth, boxHeight, confidence);
+                // Determine phase for log message
+                std::string phase = (filename.find("ocr") != std::string::npos || 
+                                   filename.find("OCR") != std::string::npos) ? "OCR" : "DETECTION";
+                LOGF("[%s] Drew bounding box: center=(%.1f,%.1f), size=%.1fx%.1f, conf=%.2f", 
+                     phase.c_str(), centerX, centerY, boxWidth, boxHeight, confidence);
             }
         }
     }

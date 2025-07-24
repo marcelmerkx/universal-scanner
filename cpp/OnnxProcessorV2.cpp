@@ -31,7 +31,7 @@ bool OnnxProcessorV2::initializeOCR(JNIEnv* env, jobject assetManager) {
     LOGD("🔧 Starting OCR initialization...");
     try {
         // Check if OCR model file exists
-        std::string ocrModelPath = "/data/data/com.cargosnap.universalscanner/files/best-OCR-Colab-22-06-25.onnx";
+        std::string ocrModelPath = "/data/data/com.cargosnap.universalscanner/files/container-ocr-bt9wl-v3-21072025.onnx";
         
         // Check if file exists
         std::ifstream file(ocrModelPath);
@@ -240,25 +240,25 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
                 rotatedImage.data, rotatedImage.width, rotatedImage.height);
         }
         
-        // STEP 4: Resize to fit 640 on longest dimension
+        // STEP 4: Resize to fit 320 on longest dimension
         int rotatedW = rotatedImage.width;
         int rotatedH = rotatedImage.height;
         
-        // Find longest dimension and scale to 640
-        int targetSize = 640;
+        // Find longest dimension and scale to 320
+        int targetSize = 320;
         int scaledW, scaledH;
         
         if (rotatedW > rotatedH) {
-            // Width is longer, scale to 640 width
+            // Width is longer, scale to 320 width
             scaledW = targetSize;
             scaledH = (rotatedH * targetSize) / rotatedW;
         } else {
-            // Height is longer (or equal), scale to 640 height
+            // Height is longer (or equal), scale to 320 height
             scaledH = targetSize;
             scaledW = (rotatedW * targetSize) / rotatedH;
         }
         
-        LOGD("🔧 Resizing %dx%d to %dx%d (longest dimension to 640)", 
+        LOGD("🔧 Resizing %dx%d to %dx%d (longest dimension to 320)", 
              rotatedW, rotatedH, scaledW, scaledH);
         auto scaledImage = rotatedImage.resize(scaledW, scaledH);
         
@@ -271,16 +271,20 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
                 scaledImage.data, scaledW, scaledH);
         }
         
-        // STEP 5: Pad to 640x640 with white
-        universalscanner::ImageData paddedImage(640, 640, 3);
+        // STEP 5: Pad to 320x320 with white (centered)
+        universalscanner::ImageData paddedImage(320, 320, 3);
         std::fill(paddedImage.data.begin(), paddedImage.data.end(), 255);
         
-        // Copy scaled image to top-left (as per spec - no centering)
-        LOGD("🔧 Padding to 640x640 with white");
+        // Calculate padding for centered placement
+        int padLeft = (320 - scaledW) / 2;
+        int padTop = (320 - scaledH) / 2;
+        
+        // Copy scaled image to center
+        LOGD("🔧 Padding to 320x320 with white (centered at %d,%d)", padLeft, padTop);
         for (int y = 0; y < scaledH; y++) {
             for (int x = 0; x < scaledW; x++) {
                 const uint8_t* src = scaledImage.getPixel(x, y);
-                uint8_t* dst = paddedImage.getPixel(x, y);
+                uint8_t* dst = paddedImage.getPixel(x + padLeft, y + padTop);
                 for (int c = 0; c < 3; c++) {
                     dst[c] = src[c];
                 }
@@ -293,10 +297,10 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
             std::string debugFilename = typeShort + "_4_ocr_final_padded.jpg";
             LOGD("📸 Saving OCR debug image: %s", debugFilename.c_str());
             UniversalScanner::ImageDebugger::saveRGB(debugFilename.c_str(), 
-                paddedImage.data, 640, 640);
+                paddedImage.data, 320, 320);
         }
         
-        LOGD("✅ OCR preprocessing complete: 640x640 padded image");
+        LOGD("✅ OCR preprocessing complete: 320x320 padded image");
         
         // Run OCR
         auto ocrResult = ocrEngine_->recognize(paddedImage, classType);
@@ -306,7 +310,7 @@ std::vector<universalscanner::ScanResult> OnnxProcessorV2::processOCRWithDetecti
         result.type = classType;
         result.value = ocrResult.text;
         result.confidence = ocrResult.confidence;
-        result.model = "yolo-ocr-v7-640";
+        result.model = ocrEngine_->getModelFilename();
         result.bbox = {
             static_cast<float>(cropBox.x),
             static_cast<float>(cropBox.y),
