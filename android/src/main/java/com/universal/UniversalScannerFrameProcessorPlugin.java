@@ -62,8 +62,8 @@ public class UniversalScannerFrameProcessorPlugin extends FrameProcessorPlugin {
             Log.i(TAG, "ONNX detection model extracted to: " + outputFile.getAbsolutePath());
             
             // Extract OCR model
-            java.io.InputStream ocrIs = appContext.getAssets().open("container-ocr-bt9wl-v3-21072025.onnx");
-            java.io.File ocrOutputFile = new java.io.File(appContext.getFilesDir(), "container-ocr-bt9wl-v3-21072025.onnx");
+            java.io.InputStream ocrIs = appContext.getAssets().open("container-ocr-bt9wl-v4-24072025.onnx");
+            java.io.File ocrOutputFile = new java.io.File(appContext.getFilesDir(), "container-ocr-bt9wl-v4-24072025.onnx");
             copyStreamToFile(ocrIs, ocrOutputFile);
             Log.i(TAG, "OCR model extracted to: " + ocrOutputFile.getAbsolutePath());
             

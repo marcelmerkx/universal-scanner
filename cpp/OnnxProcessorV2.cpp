@@ -31,7 +31,7 @@ bool OnnxProcessorV2::initializeOCR(JNIEnv* env, jobject assetManager) {
     LOGD("🔧 Starting OCR initialization...");
     try {
         // Check if OCR model file exists
-        std::string ocrModelPath = "/data/data/com.cargosnap.universalscanner/files/container-ocr-bt9wl-v3-21072025.onnx";
+        std::string ocrModelPath = "/data/data/com.cargosnap.universalscanner/files/container-ocr-bt9wl-v4-24072025.onnx";
         
         // Check if file exists
         std::ifstream file(ocrModelPath);

@@ -14,6 +14,7 @@ import { Worklets } from 'react-native-worklets-core'
 import { CODE_DETECTION_TYPES } from './CodeDetectionTypes'
 import { renderSimplifiedBoundingBoxes } from './SimplifiedBoundingBoxes'
 import { processContainerCode } from './ContainerValidation'
+import AsyncStorage from '@react-native-async-storage/async-storage'
 // import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated'
 
 // Type definitions for scanner results
@@ -80,7 +81,7 @@ export default function ModelComparisonApp(): React.ReactNode {
   const device = useCameraDevice('back')
   const [lastResult, setLastResult] = React.useState<any>(null)
   const [fps, setFps] = React.useState(0)
-  const [debugImages, setDebugImages] = React.useState(__DEV__) // Default to true in dev, false in release
+  const [debugImages, setDebugImages] = React.useState(false) // Will be loaded from storage
   const screenDimensions = Dimensions.get('window')
   const [previousDetections, setPreviousDetections] = React.useState<Map<string, any>>(new Map())
   const [modelSize, setModelSize] = React.useState<320 | 416 | 640>(320)
@@ -218,6 +219,35 @@ export default function ModelComparisonApp(): React.ReactNode {
     console.log(`[SUCCESS] Frame processor stopped, showing success UI`);
   };
   
+  // Load debug preference on mount
+  React.useEffect(() => {
+    const loadDebugPreference = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('debugImages')
+        if (stored !== null) {
+          setDebugImages(stored === 'true')
+        } else {
+          // Default to true in dev, false in release
+          setDebugImages(__DEV__)
+        }
+      } catch (error) {
+        console.error('Failed to load debug preference:', error)
+      }
+    }
+    loadDebugPreference()
+  }, [])
+
+  // Save debug preference when it changes
+  const toggleDebugImages = async () => {
+    const newValue = !debugImages
+    setDebugImages(newValue)
+    try {
+      await AsyncStorage.setItem('debugImages', newValue.toString())
+    } catch (error) {
+      console.error('Failed to save debug preference:', error)
+    }
+  }
+
   const clearAndResume = () => {
     console.log(`[CLEAR] Clearing detection and resuming scanner`);
     
@@ -585,18 +615,17 @@ export default function ModelComparisonApp(): React.ReactNode {
           <View style={styles.overlay}>
             <Text style={styles.fps}>FPS: {fps} | {inferenceTime}ms</Text>
             <Text style={styles.title}>
-              Native ONNX ({modelSize}x{modelSize}) • Debug: ON
+              Native ONNX ({modelSize}x{modelSize}) • Debug: {debugImages ? 'ON' : 'OFF'}
             </Text>
             <View style={styles.buttonContainer}>
-              {/* Debug button commented out - causes crashes when toggled
               <TouchableOpacity 
                 style={styles.debugButton} 
-                onPress={() => setDebugImages(!debugImages)}
+                onPress={toggleDebugImages}
               >
                 <Text style={styles.debugButtonText}>
                   Debug Images: {debugImages ? 'ON' : 'OFF'}
                 </Text>
-              </TouchableOpacity> */}
+              </TouchableOpacity>
               {/* <TouchableOpacity 
                 style={[styles.debugButton, modelSize === 320 && styles.activeButton]} 
                 onPress={() => setModelSize(320)}

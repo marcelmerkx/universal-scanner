@@ -6,8 +6,10 @@
 
 #ifdef NDEBUG
   #define LOGF(fmt, ...) ((void)0)
+  #define LOGE(...) ((void)0)
 #else
   #define LOGF(fmt, ...) __android_log_print(ANDROID_LOG_INFO, "UniversalScanner", fmt, ##__VA_ARGS__)
+  #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, "UniversalScanner", __VA_ARGS__)
 #endif
 
 // Use getClassName from Universal.cpp to avoid duplicate symbol

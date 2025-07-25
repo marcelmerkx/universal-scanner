@@ -146,7 +146,7 @@ std::vector<YoloOCREngine::CharBox> YoloOCREngine::parseYoloOutput(
         return {};
     }
     
-    LOGD("YOLO output shape: [%lld, %lld, %lld]", shape[0], shape[1], shape[2]);
+    LOGD("YOLO output shape: [%ld, %ld, %ld]", shape[0], shape[1], shape[2]);
     
     // Dynamically determine anchors and layout
     int numAnchors;
